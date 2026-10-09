@@ -1,4 +1,5 @@
-import { ArrowUpRight, AlertCircle, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowUpRight, AlertCircle, Sparkles, X } from 'lucide-react';
 
 const CASES = [
   {
@@ -14,7 +15,23 @@ const CASES = [
       { value: '0', label: 'pérdidas de stock' },
       { value: '<2 min', label: 'tiempo de respuesta' },
     ],
-    href: '#caso-gastronomico',
+    bottleneck: 'ambos',
+    detail: {
+      context: [
+        'Una pastelería comercial comenzó a viralizar su contenido en redes y la demanda superó su capacidad de gestión.',
+        'Los pedidos llegaban por varios canales a la vez, el stock se controlaba a mano y cada venta fuera de inventario terminaba en una disculpa y un cliente perdido.',
+      ],
+      technical: [
+        'Producción audiovisual de alta retención: guiones, grabación y edición orientados a convertir visualizaciones en pedidos.',
+        'Panel web propio de inventario y pedidos en tiempo real: cada pedido descuenta stock al instante y bloquea productos agotados.',
+        'Centralización de los canales de venta en un solo flujo, con respuestas rápidas y estado de pedido visible para el equipo.',
+      ],
+      results: [
+        { value: '+180%', label: 'alcance orgánico', note: 'El contenido llegó a una audiencia mucho mayor sin aumentar la inversión en pauta.' },
+        { value: '0', label: 'pérdidas de stock', note: 'El inventario sincronizado eliminó las ventas de productos agotados.' },
+        { value: '<2 min', label: 'tiempo de respuesta', note: 'Atención de pedidos casi inmediata, incluso en picos de demanda.' },
+      ],
+    },
   },
   {
     id: 'caso-comercio',
@@ -28,12 +45,161 @@ const CASES = [
       { value: '3.4x', label: 'retorno de inversión' },
       { value: '100%', label: 'leads atendidos automáticamente' },
     ],
-    href: '#caso-comercio',
+    bottleneck: 'operacion',
+    detail: {
+      context: [
+        'Una marca local en expansión invertía en anuncios, pero los prospectos que escribían por WhatsApp se perdían entre mensajes sin responder.',
+        'No existía un proceso de seguimiento: nadie sabía quién estaba listo para comprar ni cuándo volver a contactarlo.',
+      ],
+      technical: [
+        'Campañas de conversión directa que llevan al prospecto a una conversación de WhatsApp ya contextualizada.',
+        'CRM automatizado conectado al canal: cada contacto se registra, se etiqueta y entra en una secuencia de seguimiento.',
+        'Flujo de calificación inmediata que filtra intención y presupuesto, y deriva al equipo comercial solo los leads con potencial real.',
+      ],
+      results: [
+        { value: '3.4x', label: 'retorno de inversión', note: 'Cada sol invertido en adquisición generó más del triple en ventas atribuibles.' },
+        { value: '100%', label: 'leads atendidos automáticamente', note: 'Ningún prospecto queda sin respuesta inicial, a cualquier hora.' },
+      ],
+    },
   },
 ];
 
-function CaseCard({ item }) {
-  const { id, sector, tag, challenge, solution, metrics, href } = item;
+/** Cierra el modal y lleva al formulario avisando qué caso despertó el interés. */
+function goToContact(item) {
+  window.dispatchEvent(
+    new CustomEvent('zenda:case-interest', {
+      detail: { id: item.id, title: item.sector, bottleneck: item.bottleneck },
+    }),
+  );
+  const target = document.getElementById('contacto');
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } else {
+    window.location.hash = '#contacto';
+  }
+}
+
+function CaseModal({ item, onClose }) {
+  const closeRef = useRef(null);
+  const { detail } = item;
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeRef.current?.focus();
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+      previouslyFocused?.focus?.();
+    };
+  }, [onClose]);
+
+  const handleCta = () => {
+    onClose();
+    // Espera a que el modal libere el scroll del body antes de desplazarse.
+    setTimeout(() => goToContact(item), 50);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-end justify-center bg-zenda-dark/60 p-0 backdrop-blur-sm sm:items-center sm:p-6"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${item.id}-title`}
+        onClick={(event) => event.stopPropagation()}
+        className="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-3xl bg-white p-6 shadow-elevated sm:rounded-3xl sm:p-10"
+      >
+        <button
+          ref={closeRef}
+          type="button"
+          onClick={onClose}
+          aria-label="Cerrar"
+          className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-600 transition-colors hover:border-neutral-400 hover:text-zenda-dark focus:outline-none focus-visible:ring-2 focus-visible:ring-zenda-cyan"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-zenda-cyan/40 bg-zenda-cyan/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-zenda-blue">
+          <span className="h-1.5 w-1.5 rounded-full bg-zenda-cyan" />
+          {item.tag}
+        </span>
+        <h3
+          id={`${item.id}-title`}
+          className="mt-4 pr-12 text-2xl font-bold tracking-tight text-zenda-dark sm:text-3xl"
+        >
+          {item.sector}
+        </h3>
+
+        <div className="mt-8 space-y-8">
+          <section>
+            <h4 className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-500">
+              Contexto inicial
+            </h4>
+            <div className="mt-3 space-y-3 text-base leading-relaxed text-neutral-700">
+              {detail.context.map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h4 className="text-xs font-bold uppercase tracking-[0.2em] text-zenda-dark">
+              Solución técnica implementada por Zenda
+            </h4>
+            <ul className="mt-3 space-y-3 text-base leading-relaxed text-neutral-700">
+              {detail.technical.map((step) => (
+                <li key={step} className="flex gap-3">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-zenda-cyan" />
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section>
+            <h4 className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-500">
+              Resultados y métricas
+            </h4>
+            <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {detail.results.map((r) => (
+                <div key={r.label} className="rounded-2xl border border-neutral-200 bg-gray-50/70 p-5">
+                  <dd className="text-3xl font-bold tracking-tight text-zenda-dark">{r.value}</dd>
+                  <dt className="mt-1 text-sm font-semibold text-zenda-dark">{r.label}</dt>
+                  <p className="mt-2 text-sm leading-relaxed text-neutral-600">{r.note}</p>
+                </div>
+              ))}
+            </dl>
+          </section>
+        </div>
+
+        <div className="mt-10 flex flex-col gap-3 border-t border-neutral-100 pt-8 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-neutral-600">¿Tu negocio enfrenta algo parecido?</p>
+          <button
+            type="button"
+            onClick={handleCta}
+            className="group inline-flex items-center justify-center gap-2 rounded-full bg-zenda-dark px-8 py-4 text-sm font-semibold text-white transition-all duration-300 hover:bg-zenda-blue hover:shadow-lg hover:shadow-zenda-blue/20 focus:outline-none focus-visible:ring-4 focus-visible:ring-zenda-cyan"
+          >
+            Quiero un resultado así
+            <ArrowUpRight className="h-4 w-4 transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-zenda-cyan" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CaseCard({ item, onOpen }) {
+  const { id, sector, tag, challenge, solution, metrics } = item;
 
   return (
     <article
@@ -91,15 +257,17 @@ function CaseCard({ item }) {
           ))}
         </dl>
 
-        {/* CTA sutil */}
+        {/* CTA: abre el desglose completo */}
         <div className="mt-auto pt-10">
-          <a
-            href={href}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-zenda-dark underline-offset-4 transition-colors hover:text-zenda-blue hover:underline"
+          <button
+            type="button"
+            onClick={() => onOpen(item)}
+            aria-haspopup="dialog"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-zenda-dark underline-offset-4 transition-colors hover:text-zenda-blue hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-zenda-cyan"
           >
             Explorar caso completo
             <ArrowUpRight className="h-4 w-4 transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-          </a>
+          </button>
         </div>
       </div>
     </article>
@@ -107,6 +275,8 @@ function CaseCard({ item }) {
 }
 
 export default function CaseStudies() {
+  const [activeCase, setActiveCase] = useState(null);
+
   return (
     <section id="casos" className="border-t border-neutral-100 bg-gray-50/50 py-24 md:py-32">
       <div className="mx-auto max-w-7xl px-6">
@@ -125,10 +295,12 @@ export default function CaseStudies() {
 
         <div className="mt-16 grid grid-cols-1 gap-6 lg:grid-cols-2">
           {CASES.map((item) => (
-            <CaseCard key={item.id} item={item} />
+            <CaseCard key={item.id} item={item} onOpen={setActiveCase} />
           ))}
         </div>
       </div>
+
+      {activeCase && <CaseModal item={activeCase} onClose={() => setActiveCase(null)} />}
     </section>
   );
 }

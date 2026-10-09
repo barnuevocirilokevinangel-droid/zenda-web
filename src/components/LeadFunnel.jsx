@@ -71,7 +71,7 @@ function validate(values) {
   return errors;
 }
 
-function buildWhatsAppUrl(values) {
+function buildWhatsAppUrl(values, caseInterest = '') {
   const bottleneck = BOTTLENECKS.find((b) => b.value === values.bottleneck);
   const message = [
     `Hola, soy ${values.name.trim()} de ${values.business.trim()} (${values.industry.trim()}).`,
@@ -80,6 +80,7 @@ function buildWhatsAppUrl(values) {
     `• Principal cuello de botella: ${bottleneck ? bottleneck.label : '-'}`,
     `• Presupuesto mensual estimado: ${values.budget}`,
     `• WhatsApp de contacto: ${values.whatsapp.trim()}`,
+    ...(caseInterest ? [`• Caso que me interesó: ${caseInterest}`] : []),
     '',
     'Me gustaría conversar con un consultor.',
   ].join('\n');
@@ -92,6 +93,17 @@ function buildWhatsAppUrl(values) {
 
 /** Simula la latencia de red cuando Firebase aún no está configurado (solo desarrollo). */
 const simulateSave = () => new Promise((resolve) => setTimeout(resolve, 900));
+
+/** Tiempo máximo de espera al guardar el lead antes de continuar a WhatsApp. */
+const SAVE_TIMEOUT_MS = 6000;
+
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Tiempo de espera agotado (${ms} ms).`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function Field({ id, label, error, children }) {
   return (
@@ -109,8 +121,8 @@ function Field({ id, label, error, children }) {
   );
 }
 
-function SuccessScreen({ values, onReset }) {
-  const whatsappUrl = useMemo(() => buildWhatsAppUrl(values), [values]);
+function SuccessScreen({ values, caseInterest, onReset }) {
+  const whatsappUrl = useMemo(() => buildWhatsAppUrl(values, caseInterest), [values, caseInterest]);
 
   useEffect(() => {
     console.log('WhatsApp URL generada:', whatsappUrl);
@@ -137,7 +149,7 @@ function SuccessScreen({ values, onReset }) {
         rel="noopener noreferrer"
         className="group mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-zenda-dark px-8 py-4 text-base font-bold text-white shadow-lg ring-2 ring-zenda-dark transition-all duration-300 hover:bg-zenda-blue hover:ring-zenda-blue focus:outline-none focus-visible:ring-4 focus-visible:ring-zenda-cyan"
       >
-        Continuar a WhatsApp ahora ↗
+        Continuar por WhatsApp ↗
       </a>
 
       <button
@@ -154,8 +166,21 @@ function SuccessScreen({ values, onReset }) {
 export default function LeadFunnel() {
   const [values, setValues] = useState(INITIAL_VALUES);
   const [errors, setErrors] = useState({});
-  const [status, setStatus] = useState('idle'); // idle | sending | success | error
-  const [submitError, setSubmitError] = useState('');
+  const [status, setStatus] = useState('idle'); // idle | sending | success
+  const [caseInterest, setCaseInterest] = useState('');
+
+  useEffect(() => {
+    const onCaseInterest = (event) => {
+      const { title, bottleneck } = event.detail || {};
+      if (title) setCaseInterest(title);
+      if (bottleneck) {
+        setValues((prev) => (prev.bottleneck ? prev : { ...prev, bottleneck }));
+      }
+      setStatus((prev) => (prev === 'success' ? 'idle' : prev));
+    };
+    window.addEventListener('zenda:case-interest', onCaseInterest);
+    return () => window.removeEventListener('zenda:case-interest', onCaseInterest);
+  }, []);
 
   const sending = status === 'sending';
 
@@ -174,8 +199,11 @@ export default function LeadFunnel() {
     if (Object.keys(nextErrors).length > 0) return;
 
     setStatus('sending');
-    setSubmitError('');
 
+    // A prueba de fallos: guardar el lead es "mejor esfuerzo". Cualquier error
+    // (Firestore sin inicializar, credenciales, reglas, red, timeout) solo se
+    // registra y el usuario siempre llega a la pantalla de éxito con su enlace
+    // a WhatsApp.
     try {
       // Firebase se carga bajo demanda para mantener liviano el bundle inicial.
       const [{ db }, { addDoc, collection, serverTimestamp }] = await Promise.all([
@@ -184,36 +212,38 @@ export default function LeadFunnel() {
       ]);
 
       if (db) {
-        await addDoc(collection(db, 'leads'), {
-          name: values.name.trim(),
-          business: values.business.trim(),
-          industry: values.industry.trim(),
-          whatsapp: values.whatsapp.trim(),
-          bottleneck: values.bottleneck,
-          budget: values.budget,
-          source: 'web-zenda',
-          createdAt: serverTimestamp(),
-        });
+        // addDoc puede quedarse esperando indefinidamente sin red: se limita la espera.
+        await withTimeout(
+          addDoc(collection(db, 'leads'), {
+            name: values.name.trim(),
+            business: values.business.trim(),
+            industry: values.industry.trim(),
+            whatsapp: values.whatsapp.trim(),
+            bottleneck: values.bottleneck,
+            budget: values.budget,
+            interestedCase: caseInterest || null,
+            source: 'web-zenda',
+            createdAt: serverTimestamp(),
+          }),
+          SAVE_TIMEOUT_MS,
+        );
       } else if (import.meta.env.DEV) {
         await simulateSave();
         console.info('[Zenda] Lead simulado (Firebase no configurado):', values);
       } else {
-        throw new Error('Firebase no está configurado.');
+        console.warn('[Zenda] Firestore no está inicializado; el lead no se guardó.');
       }
-      setStatus('success');
     } catch (error) {
-      console.error('[Zenda] Error al guardar el lead:', error);
-      setSubmitError(
-        'No pudimos enviar tu diagnóstico. Inténtalo de nuevo en unos minutos o escríbenos por WhatsApp.',
-      );
-      setStatus('error');
+      console.warn('[Zenda] No se pudo guardar el lead (se continúa a WhatsApp):', error);
     }
+
+    setStatus('success');
   };
 
   const handleReset = () => {
     setValues(INITIAL_VALUES);
     setErrors({});
-    setSubmitError('');
+    setCaseInterest('');
     setStatus('idle');
   };
 
@@ -246,9 +276,25 @@ export default function LeadFunnel() {
             <div className="lg:col-span-3">
               <div className="rounded-2xl border border-neutral-200 bg-white p-6 sm:p-8">
                 {status === 'success' ? (
-                  <SuccessScreen values={values} onReset={handleReset} />
+                  <SuccessScreen values={values} caseInterest={caseInterest} onReset={handleReset} />
                 ) : (
                   <form onSubmit={handleSubmit} noValidate className="space-y-6">
+                    {caseInterest && (
+                      <div className="flex items-start justify-between gap-3 rounded-xl border border-zenda-cyan/40 bg-zenda-cyan/10 px-4 py-3 text-sm text-zenda-dark">
+                        <p>
+                          <span className="font-semibold">Caso de interés:</span> {caseInterest}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setCaseInterest('')}
+                          aria-label="Quitar caso de interés"
+                          className="shrink-0 text-neutral-500 transition-colors hover:text-zenda-dark"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
+
                     <Field id="name" label="Nombre y apellido" error={errors.name}>
                       <input
                         id="name"
@@ -370,15 +416,6 @@ export default function LeadFunnel() {
                         ))}
                       </select>
                     </Field>
-
-                    {status === 'error' && (
-                      <p
-                        role="alert"
-                        className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-                      >
-                        {submitError}
-                      </p>
-                    )}
 
                     <button
                       type="submit"
