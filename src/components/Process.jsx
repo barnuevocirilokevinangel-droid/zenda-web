@@ -1,4 +1,4 @@
-import Reveal from './Reveal.jsx';
+import ScrollReveal from './ScrollReveal.jsx';
 
 const STEPS = [
   {
@@ -25,16 +25,16 @@ export default function Process() {
   return (
     <section id="metodo" className="bg-white py-24 md:py-32">
       <div className="mx-auto max-w-7xl px-6">
-        <Reveal className="max-w-3xl">
+        <ScrollReveal className="max-w-3xl">
           <p className="mb-5 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500">
             Cómo trabajamos
           </p>
           <h2 className="text-4xl font-bold tracking-tight text-zenda-dark sm:text-5xl">
             De la auditoría a la ejecución sin fricción.
           </h2>
-        </Reveal>
+        </ScrollReveal>
 
-        <Reveal as="ol" delay={0.08} className="relative mt-20 grid grid-cols-1 gap-14 md:grid-cols-3 md:gap-10">
+        <ScrollReveal as="ol" delay={0.08} className="relative mt-20 grid grid-cols-1 gap-14 md:grid-cols-3 md:gap-10">
           {/* Línea conectora (solo escritorio) */}
           <div
             aria-hidden="true"
@@ -59,7 +59,7 @@ export default function Process() {
               </p>
             </li>
           ))}
-        </Reveal>
+        </ScrollReveal>
       </div>
     </section>
   );

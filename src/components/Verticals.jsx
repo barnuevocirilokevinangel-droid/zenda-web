@@ -1,15 +1,15 @@
-import { ArrowUpRight, Megaphone, Workflow, LayoutDashboard } from 'lucide-react';
-import Reveal from './Reveal.jsx';
+﻿import { ArrowUpRight, Megaphone, Workflow, LayoutDashboard } from 'lucide-react';
+import ScrollReveal from './ScrollReveal.jsx';
 
 const VERTICALS = [
   {
     id: '01',
     name: 'ZENDA MARKETING',
-    badge: 'Atracción',
+    badge: 'AtracciÃ³n',
     icon: Megaphone,
     description:
-      'Atracción de alto impacto, contenido audiovisual para conversión y gestión de pauta.',
-    tags: ['Contenido', 'Paid media', 'Conversión'],
+      'AtracciÃ³n de alto impacto, contenido audiovisual para conversiÃ³n y gestiÃ³n de pauta.',
+    tags: ['Contenido', 'Paid media', 'ConversiÃ³n'],
     href: '#marketing',
   },
   {
@@ -18,7 +18,7 @@ const VERTICALS = [
     badge: 'Eficiencia',
     icon: Workflow,
     description:
-      'Conexión de CRM, calificación de prospectos y flujos automáticos sin intervención manual.',
+      'ConexiÃ³n de CRM, calificaciÃ³n de prospectos y flujos automÃ¡ticos sin intervenciÃ³n manual.',
     tags: ['CRM', 'Lead scoring', 'Flujos'],
     href: '#automation',
   },
@@ -28,7 +28,7 @@ const VERTICALS = [
     badge: 'Software',
     icon: LayoutDashboard,
     description:
-      'Software y web apps a medida: paneles de gestión, inventarios y control operativo.',
+      'Software y web apps a medida: paneles de gestiÃ³n, inventarios y control operativo.',
     tags: ['Paneles', 'Inventarios', 'Web apps'],
     href: '#core-apps',
   },
@@ -40,7 +40,7 @@ function VerticalCard({ vertical }) {
   return (
     <a
       href={href}
-      className="group relative flex w-full flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white transition-all duration-300 hover:-translate-y-[2px] hover:border-zenda-blue/30 hover:shadow-elevated"
+      className="group relative flex w-full flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white transition-all duration-300 hover:-translate-y-[4px] hover:border-zenda-blue/30 hover:shadow-elevated"
     >
       {/* Cabecera visual */}
       <div className="relative flex h-44 items-center justify-center border-b border-neutral-100 bg-neutral-50/70">
@@ -92,7 +92,7 @@ export default function Verticals() {
   return (
     <section id="verticales" className="border-t border-neutral-100 bg-white py-24 md:py-32">
       <div className="mx-auto max-w-7xl px-6">
-        <Reveal className="max-w-2xl">
+        <ScrollReveal className="max-w-2xl">
           <p className="mb-5 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500">
             Soluciones integradas
           </p>
@@ -100,16 +100,16 @@ export default function Verticals() {
             Nuestras verticales
           </h2>
           <p className="mt-6 text-base leading-relaxed text-neutral-600 sm:text-lg">
-            Tres áreas que trabajan como un solo sistema: atraemos, automatizamos y
-            construimos la infraestructura para que tu operación crezca.
+            Tres Ã¡reas que trabajan como un solo sistema: atraemos, automatizamos y
+            construimos la infraestructura para que tu operaciÃ³n crezca.
           </p>
-        </Reveal>
+        </ScrollReveal>
 
         <div className="mt-16 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
           {VERTICALS.map((vertical, i) => (
-            <Reveal key={vertical.id} delay={i * 0.08} className="flex">
+            <ScrollReveal key={vertical.id} delay={i * 0.1} className="flex">
               <VerticalCard vertical={vertical} />
-            </Reveal>
+            </ScrollReveal>
           ))}
         </div>
       </div>

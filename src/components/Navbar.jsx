@@ -36,7 +36,7 @@ export default function Navbar() {
         {/* CTA */}
         <a
           href="#contacto"
-          className="group hidden items-center gap-1.5 rounded-full bg-zenda-dark px-6 py-3 text-xs font-semibold tracking-widest text-white transition-all duration-300 hover:bg-zenda-blue hover:shadow-lg hover:shadow-zenda-blue/20 md:inline-flex"
+          className="group hidden items-center gap-1.5 rounded-full bg-zenda-dark px-6 py-3 text-xs font-semibold tracking-widest text-white transition-all duration-300 hover:scale-[1.02] hover:bg-zenda-blue active:scale-[0.98] hover:shadow-lg hover:shadow-zenda-blue/20 md:inline-flex"
         >
           ESCRÍBENOS
           <ArrowUpRight className="h-4 w-4 transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-zenda-cyan" />
@@ -72,7 +72,7 @@ export default function Navbar() {
           <a
             href="#contacto"
             onClick={() => setOpen(false)}
-            className="inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-zenda-dark px-6 py-3 text-xs font-semibold tracking-widest text-white"
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-zenda-dark px-6 py-3 text-xs font-semibold tracking-widest text-white transition-transform duration-300 active:scale-[0.98]"
           >
             ESCRÍBENOS
             <ArrowUpRight className="h-4 w-4 text-zenda-cyan" />

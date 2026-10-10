@@ -1,6 +1,6 @@
 import { AlertCircle, ArrowUpRight, Cpu, Gauge } from 'lucide-react';
 import CaseGallery from './CaseGallery.jsx';
-import Reveal from './Reveal.jsx';
+import ScrollReveal from './ScrollReveal.jsx';
 
 const CASES = [
   {
@@ -117,7 +117,7 @@ function CaseCard({ item }) {
   return (
     <article
       id={id}
-      className="group flex h-full flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white transition-all duration-300 hover:-translate-y-[3px] hover:border-zenda-blue/30 hover:shadow-[0_18px_40px_-12px_rgba(11,15,25,0.12)]"
+      className="group flex h-full flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white transition-all duration-300 hover:-translate-y-[4px] hover:border-zenda-blue/30 hover:shadow-[0_18px_40px_-12px_rgba(11,15,25,0.12)]"
     >
       {/* Barra superior estilo ficha técnica */}
       <div className="flex items-center justify-between border-b border-neutral-100 bg-neutral-50/70 px-6 py-3.5 sm:px-8">
@@ -192,7 +192,7 @@ function CaseCard({ item }) {
           <button
             type="button"
             onClick={() => goToContact(item)}
-            className="group/cta inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-6 py-3 text-sm font-semibold text-zenda-dark transition-all duration-300 hover:-translate-y-px hover:border-zenda-dark hover:bg-zenda-dark hover:text-white hover:shadow-lg hover:shadow-zenda-blue/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-zenda-cyan"
+            className="group/cta inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-6 py-3 text-sm font-semibold text-zenda-dark transition-all duration-300 hover:scale-[1.02] hover:border-zenda-dark hover:bg-zenda-dark hover:text-white hover:shadow-lg hover:shadow-zenda-blue/20 active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-zenda-cyan"
           >
             {cta}
             <ArrowUpRight className="h-4 w-4 text-zenda-blue transition-all duration-300 group-hover/cta:-translate-y-0.5 group-hover/cta:translate-x-0.5 group-hover/cta:text-zenda-cyan" />
@@ -207,7 +207,7 @@ export default function CaseStudies() {
   return (
     <section id="casos" className="border-t border-neutral-100 bg-gray-50/50 py-24 md:py-32">
       <div className="mx-auto max-w-7xl px-6">
-        <Reveal y={20} className="max-w-3xl">
+        <ScrollReveal className="max-w-3xl">
           <p className="mb-5 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500">
             Casos de estudio
           </p>
@@ -218,13 +218,13 @@ export default function CaseStudies() {
             Marketing visual y software operando juntos en negocios reales: del cuello de botella
             a la arquitectura que lo resuelve.
           </p>
-        </Reveal>
+        </ScrollReveal>
 
         <div className="mt-16 grid grid-cols-1 gap-6 lg:grid-cols-2">
           {CASES.map((item, i) => (
-            <Reveal key={item.id} y={20} delay={0.1 + i * 0.12} className="h-full">
+            <ScrollReveal key={item.id} delay={0.1 + i * 0.12} className="h-full">
               <CaseCard item={item} />
-            </Reveal>
+            </ScrollReveal>
           ))}
         </div>
       </div>

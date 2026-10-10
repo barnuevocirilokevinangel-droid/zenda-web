@@ -7,7 +7,7 @@ import {
   Megaphone,
   Workflow,
 } from 'lucide-react';
-import Reveal from './Reveal.jsx';
+import ScrollReveal from './ScrollReveal.jsx';
 
 const BOTTLENECKS = [
   {
@@ -148,7 +148,7 @@ function SuccessScreen({ values, caseInterest, onReset }) {
         href={whatsappUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="group mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-zenda-dark px-8 py-4 text-base font-bold text-white shadow-lg ring-2 ring-zenda-dark transition-all duration-300 hover:bg-zenda-blue hover:ring-zenda-blue focus:outline-none focus-visible:ring-4 focus-visible:ring-zenda-cyan"
+        className="group mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-zenda-dark px-8 py-4 text-base font-bold text-white shadow-lg ring-2 ring-zenda-dark transition-all duration-300 hover:scale-[1.02] hover:bg-zenda-blue hover:ring-zenda-blue active:scale-[0.98] focus:outline-none focus-visible:ring-4 focus-visible:ring-zenda-cyan"
       >
         Continuar por WhatsApp ↗
       </a>
@@ -257,7 +257,7 @@ export default function LeadFunnel() {
   return (
     <section id="contacto" className="border-t border-neutral-100 bg-white py-24 md:py-32">
       <div className="mx-auto max-w-7xl px-6">
-        <Reveal className="overflow-hidden rounded-3xl border border-neutral-200 bg-gray-50/70 p-6 shadow-elevated sm:p-10 lg:p-14">
+        <ScrollReveal className="overflow-hidden rounded-3xl border border-neutral-200 bg-gray-50/70 p-6 shadow-elevated sm:p-10 lg:p-14">
           <div className="grid grid-cols-1 gap-12 lg:grid-cols-5 lg:gap-16">
             {/* Encabezado */}
             <div className="lg:col-span-2">
@@ -421,7 +421,7 @@ export default function LeadFunnel() {
                     <button
                       type="submit"
                       disabled={sending}
-                      className="group inline-flex w-full items-center justify-center gap-2 rounded-full bg-zenda-dark px-8 py-4 text-sm font-semibold text-white transition-all duration-300 hover:bg-zenda-blue hover:shadow-lg hover:shadow-zenda-blue/20 disabled:cursor-not-allowed disabled:opacity-80 disabled:hover:bg-zenda-dark disabled:hover:shadow-none"
+                      className="group inline-flex w-full items-center justify-center gap-2 rounded-full bg-zenda-dark px-8 py-4 text-sm font-semibold text-white transition-all duration-300 hover:scale-[1.02] hover:bg-zenda-blue hover:shadow-lg hover:shadow-zenda-blue/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100 disabled:opacity-80 disabled:hover:bg-zenda-dark disabled:hover:shadow-none"
                     >
                       {sending ? (
                         <>
@@ -440,7 +440,7 @@ export default function LeadFunnel() {
               </div>
             </div>
           </div>
-        </Reveal>
+        </ScrollReveal>
       </div>
     </section>
   );
