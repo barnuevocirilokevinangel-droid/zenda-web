@@ -1,5 +1,3 @@
-import Logo from './Logo.jsx';
-
 const QUICK_LINKS = [
   { label: 'Servicios', href: '#verticales' },
   { label: 'Método', href: '#metodo' },
@@ -20,8 +18,9 @@ export default function Footer() {
       <div className="mx-auto max-w-7xl px-6 py-16 md:py-20">
         <div className="grid grid-cols-1 gap-12 md:grid-cols-3">
           <div className="md:col-span-1">
-            <a href="#" aria-label="Zenda — inicio" className="inline-block">
-              <Logo variant="light" />
+            <a href="#" aria-label="Zenda — inicio" className="inline-flex items-center gap-2.5">
+              <img src="/isotipo-zenda.png" alt="" aria-hidden="true" className="h-7 w-auto object-contain" />
+              <span className="text-xl font-bold tracking-tight text-white">zenda</span>
             </a>
             <p className="mt-5 max-w-xs text-sm leading-relaxed text-neutral-400">
               Agencia de marketing e ingeniería de operaciones.

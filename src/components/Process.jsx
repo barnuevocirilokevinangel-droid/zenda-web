@@ -1,3 +1,5 @@
+import Reveal from './Reveal.jsx';
+
 const STEPS = [
   {
     number: '01',
@@ -23,16 +25,16 @@ export default function Process() {
   return (
     <section id="metodo" className="bg-white py-24 md:py-32">
       <div className="mx-auto max-w-7xl px-6">
-        <div className="max-w-3xl">
+        <Reveal className="max-w-3xl">
           <p className="mb-5 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500">
             Cómo trabajamos
           </p>
           <h2 className="text-4xl font-bold tracking-tight text-zenda-dark sm:text-5xl">
             De la auditoría a la ejecución sin fricción.
           </h2>
-        </div>
+        </Reveal>
 
-        <ol className="relative mt-20 grid grid-cols-1 gap-14 md:grid-cols-3 md:gap-10">
+        <Reveal as="ol" delay={0.08} className="relative mt-20 grid grid-cols-1 gap-14 md:grid-cols-3 md:gap-10">
           {/* Línea conectora (solo escritorio) */}
           <div
             aria-hidden="true"
@@ -57,7 +59,7 @@ export default function Process() {
               </p>
             </li>
           ))}
-        </ol>
+        </Reveal>
       </div>
     </section>
   );

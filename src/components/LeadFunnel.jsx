@@ -7,6 +7,7 @@ import {
   Megaphone,
   Workflow,
 } from 'lucide-react';
+import Reveal from './Reveal.jsx';
 
 const BOTTLENECKS = [
   {
@@ -256,7 +257,7 @@ export default function LeadFunnel() {
   return (
     <section id="contacto" className="border-t border-neutral-100 bg-white py-24 md:py-32">
       <div className="mx-auto max-w-7xl px-6">
-        <div className="overflow-hidden rounded-3xl border border-neutral-200 bg-gray-50/70 p-6 shadow-elevated sm:p-10 lg:p-14">
+        <Reveal className="overflow-hidden rounded-3xl border border-neutral-200 bg-gray-50/70 p-6 shadow-elevated sm:p-10 lg:p-14">
           <div className="grid grid-cols-1 gap-12 lg:grid-cols-5 lg:gap-16">
             {/* Encabezado */}
             <div className="lg:col-span-2">
@@ -439,7 +440,7 @@ export default function LeadFunnel() {
               </div>
             </div>
           </div>
-        </div>
+        </Reveal>
       </div>
     </section>
   );

@@ -1,4 +1,5 @@
 import { ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import Reveal from './Reveal.jsx';
 
 export default function Hero() {
   return (
@@ -10,7 +11,7 @@ export default function Hero() {
       />
 
       <div className="mx-auto max-w-7xl px-6 pb-28 pt-24 md:pb-36 md:pt-32">
-        <div className="mx-auto flex max-w-4xl flex-col items-center text-center">
+        <Reveal className="mx-auto flex max-w-4xl flex-col items-center text-center">
           <p className="mb-8 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500">
             Crecimiento e infraestructura operativa
           </p>
@@ -41,7 +42,7 @@ export default function Hero() {
               <ArrowDownRight className="h-4 w-4 text-neutral-400 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:translate-y-0.5 group-hover:text-zenda-dark" />
             </a>
           </div>
-        </div>
+        </Reveal>
       </div>
     </section>
   );

@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { ArrowUpRight, Menu, X } from 'lucide-react';
-import Logo from './Logo.jsx';
 
 const NAV_LINKS = [
   { label: 'SERVICIOS', href: '#verticales' },
@@ -16,8 +15,9 @@ export default function Navbar() {
     <header className="sticky top-0 z-50 w-full border-b border-neutral-100 bg-white/90 backdrop-blur-md">
       <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6">
         {/* Logo */}
-        <a href="#" aria-label="Zenda — inicio">
-          <Logo />
+        <a href="#" aria-label="Zenda — inicio" className="inline-flex items-center gap-2.5">
+          <img src="/isotipo-zenda.png" alt="" aria-hidden="true" className="h-7 w-auto object-contain" />
+          <span className="text-xl font-bold tracking-tight text-zenda-dark">zenda</span>
         </a>
 
         {/* Links centrales */}

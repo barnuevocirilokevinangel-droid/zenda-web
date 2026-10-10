@@ -1,4 +1,5 @@
 import { ArrowUpRight, Megaphone, Workflow, LayoutDashboard } from 'lucide-react';
+import Reveal from './Reveal.jsx';
 
 const VERTICALS = [
   {
@@ -39,7 +40,7 @@ function VerticalCard({ vertical }) {
   return (
     <a
       href={href}
-      className="group relative flex flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white transition-all duration-300 hover:-translate-y-1 hover:border-neutral-300 hover:shadow-elevated"
+      className="group relative flex w-full flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white transition-all duration-300 hover:-translate-y-[2px] hover:border-zenda-blue/30 hover:shadow-elevated"
     >
       {/* Cabecera visual */}
       <div className="relative flex h-44 items-center justify-center border-b border-neutral-100 bg-neutral-50/70">
@@ -91,7 +92,7 @@ export default function Verticals() {
   return (
     <section id="verticales" className="border-t border-neutral-100 bg-white py-24 md:py-32">
       <div className="mx-auto max-w-7xl px-6">
-        <div className="max-w-2xl">
+        <Reveal className="max-w-2xl">
           <p className="mb-5 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500">
             Soluciones integradas
           </p>
@@ -102,11 +103,13 @@ export default function Verticals() {
             Tres áreas que trabajan como un solo sistema: atraemos, automatizamos y
             construimos la infraestructura para que tu operación crezca.
           </p>
-        </div>
+        </Reveal>
 
         <div className="mt-16 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {VERTICALS.map((vertical) => (
-            <VerticalCard key={vertical.id} vertical={vertical} />
+          {VERTICALS.map((vertical, i) => (
+            <Reveal key={vertical.id} delay={i * 0.08} className="flex">
+              <VerticalCard vertical={vertical} />
+            </Reveal>
           ))}
         </div>
       </div>
