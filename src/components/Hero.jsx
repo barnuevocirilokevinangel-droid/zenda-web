@@ -1,5 +1,6 @@
 import { ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import ScrollReveal from './ScrollReveal.jsx';
+import TextReveal from './TextReveal.jsx';
 
 export default function Hero() {
   return (
@@ -12,24 +13,30 @@ export default function Hero() {
 
       <div className="mx-auto max-w-7xl px-6 pb-28 pt-24 md:pb-36 md:pt-32">
         <div className="mx-auto flex max-w-4xl flex-col items-center text-center">
-          <ScrollReveal delay={0.1}>
-            <p className="mb-8 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500">
-              Crecimiento e infraestructura operativa
-            </p>
-          </ScrollReveal>
+          <TextReveal
+            as="p"
+            delay={0.1}
+            className="mb-8 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500"
+          >
+            Crecimiento e infraestructura operativa
+          </TextReveal>
 
-          <ScrollReveal delay={0.2}>
-            <h1 className="text-5xl font-bold leading-[1.05] tracking-tight text-zenda-dark sm:text-6xl lg:text-7xl">
-              Sistemas y marketing para escalar sin fricción.
-            </h1>
-          </ScrollReveal>
+          <TextReveal
+            as="h1"
+            delay={0.2}
+            className="text-5xl font-bold leading-[1.05] tracking-tight text-zenda-dark sm:text-6xl lg:text-7xl"
+          >
+            Sistemas y marketing para escalar sin fricción.
+          </TextReveal>
 
-          <ScrollReveal delay={0.3}>
-            <p className="mt-8 max-w-2xl text-base leading-relaxed text-neutral-600 sm:text-lg">
-              Diseñamos estrategias de contenido y captación respaldadas por software y
-              automatizaciones a medida para eliminar cuellos de botella en tu negocio.
-            </p>
-          </ScrollReveal>
+          <TextReveal
+            as="p"
+            delay={0.3}
+            className="mt-8 max-w-2xl text-base leading-relaxed text-neutral-600 sm:text-lg"
+          >
+            Diseñamos estrategias de contenido y captación respaldadas por software y
+            automatizaciones a medida para eliminar cuellos de botella en tu negocio.
+          </TextReveal>
 
           <ScrollReveal
             delay={0.4}
