@@ -36,7 +36,16 @@ export default {
       },
       backgroundImage: {
         'grid-pattern': "radial-gradient(circle, #E2E8F0 1px, transparent 1px)",
-      }
+      },
+      keyframes: {
+        marquee: {
+          '0%': { transform: 'translateX(0)' },
+          '100%': { transform: 'translateX(-50%)' },
+        },
+      },
+      animation: {
+        marquee: 'marquee 35s linear infinite',
+      },
     },
   },
   plugins: [],
