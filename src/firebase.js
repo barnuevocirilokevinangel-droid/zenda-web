@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -15,25 +16,22 @@ export const isFirebaseConfigured = Boolean(
   firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId,
 );
 
-/**
- * Instancia de Firestore, o `null` si Firebase no está configurado.
- * Los consumidores deben comprobar `db` antes de usarla: así la app no se
- * rompe en desarrollo mientras las credenciales no estén en .env.
- */
 let db = null;
+let auth = null;
 
 if (isFirebaseConfigured) {
   try {
     const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
     db = getFirestore(app);
+    auth = getAuth(app);
   } catch (error) {
     console.warn('[Zenda] No se pudo inicializar Firebase:', error);
   }
 } else if (import.meta.env.DEV) {
   console.info(
-    '[Zenda] Firebase no configurado: los envíos del formulario se simularán en desarrollo. ' +
+    '[Zenda] Firebase no configurado: los envíos del formulario y autenticación se simularán en desarrollo. ' +
       'Copia .env.example a .env y completa las variables VITE_FIREBASE_*.',
   );
 }
 
-export { db };
+export { db, auth };

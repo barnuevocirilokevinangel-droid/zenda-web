@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
 Disallow: /onboarding
+Disallow: /admin
 Sitemap: https://wearezenda.com/sitemap.xml

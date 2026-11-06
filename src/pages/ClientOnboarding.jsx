@@ -56,12 +56,13 @@ const STEPS = [
   },
 ];
 
+// Rangos de ticket adaptados a comercios y empresas locales (en Soles)
 const TICKETS = [
-  'Menos de US$ 50 (o aprox. < S/ 190)',
-  'US$ 50 – 200 (aprox. S/ 190 – S/ 760)',
-  'US$ 200 – 800 (aprox. S/ 760 – S/ 3,000)',
-  'US$ 800 – 2,500 (aprox. S/ 3,000 – S/ 9,500)',
-  'Más de US$ 2,500 (o más de S/ 9,500)',
+  'Menos de S/ 50 (Consumo diario / servicios rápidos)',
+  'S/ 50 – S/ 150 (Servicios estándar o retail)',
+  'S/ 150 – S/ 500 (Ticket medio / atención especializada)',
+  'S/ 500 – S/ 2,000 (Servicios corporativos / B2B)',
+  'Más de S/ 2,000 (Alto valor o ticket premium)',
   'Variable según cotización / proyecto',
 ];
 
@@ -155,7 +156,7 @@ function validateStep(step, v) {
     if (!v.businessName.trim()) errors.businessName = REQUIRED;
     if (!v.decisionMaker.trim()) errors.decisionMaker = 'Indica el nombre y cargo del decisor.';
     if (v.contact.trim().length < 6) errors.contact = 'Ingresa un WhatsApp o teléfono de contacto válido.';
-    if (!v.socialLinks.trim()) errors.socialLinks = 'Indica al menos un enlace o usuario de red social o web.';
+    // Campo socialLinks ahora es completamente OPCIONAL; no bloquea ni muestra error.
   } else if (step === 1) {
     if (!v.starProduct.trim()) errors.starProduct = REQUIRED;
     if (!v.avgTicket) errors.avgTicket = 'Selecciona el rango de ticket promedio.';
@@ -223,12 +224,13 @@ export default function ClientOnboarding() {
   const submit = async () => {
     setStatus('sending');
     try {
+      // Documento completo para Firestore con timestamp estándar y serverTimestamp
       await saveDocument(COLLECTION, {
         businessName: values.businessName.trim(),
         rucOrLegal: values.rucOrLegal.trim() || null,
         decisionMaker: values.decisionMaker.trim(),
         contact: values.contact.trim(),
-        socialLinks: values.socialLinks.trim(),
+        socialLinks: values.socialLinks.trim() || null,
         driveFolder: values.driveFolder.trim() || null,
         starProduct: values.starProduct.trim(),
         avgTicket: values.avgTicket,
@@ -241,12 +243,13 @@ export default function ClientOnboarding() {
         goalDetail: values.goalDetail.trim(),
         privacyConsent: true,
         privacyPolicyVersion: COMPANY.lastUpdated,
+        timestamp: new Date().toISOString(),
         domain: COMPANY.domain || 'wearezenda.com',
         source: 'portal-client-onboarding',
       });
       setStatus('done');
     } catch (error) {
-      console.warn('[Zenda] Error al guardar onboarding:', error);
+      console.warn('[Zenda] Error al guardar onboarding en Firestore:', error);
       setStatus('error');
     }
   };
@@ -278,22 +281,15 @@ export default function ClientOnboarding() {
   };
 
   // Mensaje prellenado para WhatsApp al finalizar con éxito
+  const bottleneckSummary = values.bottleneckProcess.trim().slice(0, 140);
   const whatsappNotificationText = [
-    `Hola equipo de Zenda, soy *${values.decisionMaker.trim()}* de *${values.businessName.trim()}*.`,
-    'Acabo de completar el portal de Onboarding interactivo en wearezenda.com 🚀',
-    '',
-    '📊 *Resumen de la Auditoría:*',
-    `• *Producto estrella:* ${values.starProduct.trim()}`,
-    `• *Canal principal:* ${values.mainChannel}`,
-    `• *Ticket promedio:* ${values.avgTicket}`,
-    `• *Volumen semanal:* ${values.weeklyVolume}`,
-    `• *Meta prioritaria a 90 días:* ${values.primaryGoal}`,
-    values.driveFolder.trim() ? `• *Carpeta Drive recursos:* ${values.driveFolder.trim()}` : null,
-    '',
-    'Quedo atento para coordinar la auditoría operativa y los siguientes pasos.',
-  ]
-    .filter(Boolean)
-    .join('\n');
+    '🚨 Nuevo Onboarding completado en Zenda:',
+    `- Negocio: ${values.businessName.trim()}`,
+    `- Decisor: ${values.decisionMaker.trim()}`,
+    `- Contacto: ${values.contact.trim()}`,
+    `- Ticket: ${values.avgTicket}`,
+    `- Cuello de botella: ${bottleneckSummary}`,
+  ].join('\n');
 
   const whatsappNotificationUrl = buildWhatsAppLink(whatsappNotificationText);
 
@@ -302,11 +298,14 @@ export default function ClientOnboarding() {
     `Hola Zenda, soy ${values.decisionMaker.trim()} de ${values.businessName.trim()}.`,
     'Completé el formulario de onboarding en wearezenda.com. Te comparto los datos:',
     `• Decisor y contacto: ${values.decisionMaker.trim()} (${values.contact.trim()})`,
-    `• Redes / Web: ${values.socialLinks.trim()}`,
+    values.socialLinks.trim() ? `• Redes / Web: ${values.socialLinks.trim()}` : null,
     `• Producto estrella: ${values.starProduct.trim()}`,
+    `• Ticket promedio: ${values.avgTicket}`,
     `• Cuello de botella: ${values.bottleneckProcess.trim()}`,
     `• Meta a 90 días: ${values.primaryGoal} - ${values.goalDetail.trim()}`,
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const slideAnimation = reduceMotion
     ? { initial: false, animate: { opacity: 1 }, exit: { opacity: 0 } }
@@ -402,29 +401,25 @@ export default function ClientOnboarding() {
             </div>
           </div>
 
+          {/* Enlaces a redes o web: COMPLETAMENTE OPCIONAL */}
           <div>
-            <label htmlFor="socialLinks" className="mb-2 block text-xs font-mono uppercase tracking-wider text-neutral-300">
-              Enlaces a Redes Sociales o Sitio Web <span className="text-zenda-cyan">*</span>
-            </label>
+            <div className="mb-2 flex items-center justify-between">
+              <label htmlFor="socialLinks" className="block text-xs font-mono uppercase tracking-wider text-neutral-300">
+                Enlaces a Redes Sociales o Sitio Web
+              </label>
+              <span className="text-[11px] font-mono text-neutral-400">Opcional</span>
+            </div>
             <input
               id="socialLinks"
               type="text"
               placeholder="https://instagram.com/tumarca, tiktok.com/@tumarca, miweb.com"
               value={values.socialLinks}
               onChange={onText('socialLinks')}
-              className={`w-full rounded-xl border bg-white/[0.03] px-4 py-3.5 text-base text-white placeholder:text-neutral-500 transition-all outline-none ${
-                errors.socialLinks
-                  ? 'border-red-500/70 focus:border-red-500 focus:ring-1 focus:ring-red-500'
-                  : 'border-white/10 hover:border-white/20 focus:border-zenda-cyan focus:ring-1 focus:ring-zenda-cyan'
-              }`}
+              className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3.5 text-base text-white placeholder:text-neutral-500 transition-all outline-none hover:border-white/20 focus:border-zenda-cyan focus:ring-1 focus:ring-zenda-cyan"
             />
-            {errors.socialLinks ? (
-              <p className="mt-1.5 text-xs font-medium text-red-400">{errors.socialLinks}</p>
-            ) : (
-              <p className="mt-1.5 text-xs text-neutral-400">
-                Auditaremos tu presencia visual, tiempo de respuesta y tráfico orgánico actual.
-              </p>
-            )}
+            <p className="mt-1.5 text-xs text-neutral-400">
+              Auditaremos tu presencia visual, tiempo de respuesta y tráfico orgánico actual si cuentas con ellos.
+            </p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
@@ -480,8 +475,8 @@ export default function ClientOnboarding() {
           </div>
 
           <div>
-            <label htmlFor="avgTicket" className="mb-3 block text-xs font-mono uppercase tracking-wider text-neutral-300">
-              Ticket Promedio en Soles o Dólares <span className="text-zenda-cyan">*</span>
+            <label className="mb-3 block text-xs font-mono uppercase tracking-wider text-neutral-300">
+              Ticket Promedio (en Soles) <span className="text-zenda-cyan">*</span>
             </label>
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
               {TICKETS.map((t) => {
@@ -853,6 +848,10 @@ export default function ClientOnboarding() {
                     <dd className="col-span-2 text-neutral-200">{values.starProduct}</dd>
                   </div>
                   <div className="grid grid-cols-3 gap-4 py-3">
+                    <dt className="font-mono text-xs text-neutral-400">Ticket promedio:</dt>
+                    <dd className="col-span-2 text-neutral-200">{values.avgTicket}</dd>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 py-3">
                     <dt className="font-mono text-xs text-neutral-400">Canal & Volumen:</dt>
                     <dd className="col-span-2 text-neutral-200">{values.mainChannel} · {values.weeklyVolume}</dd>
                   </div>
@@ -860,6 +859,12 @@ export default function ClientOnboarding() {
                     <dt className="font-mono text-xs text-neutral-400">Meta a 90 días:</dt>
                     <dd className="col-span-2 font-medium text-zenda-cyan">{values.primaryGoal}</dd>
                   </div>
+                  {values.socialLinks && (
+                    <div className="grid grid-cols-3 gap-4 py-3">
+                      <dt className="font-mono text-xs text-neutral-400">Redes / Web:</dt>
+                      <dd className="col-span-2 truncate text-neutral-300">{values.socialLinks}</dd>
+                    </div>
+                  )}
                   {values.driveFolder && (
                     <div className="grid grid-cols-3 gap-4 py-3">
                       <dt className="font-mono text-xs text-neutral-400">Carpeta Drive:</dt>
@@ -887,7 +892,7 @@ export default function ClientOnboarding() {
                   className="group inline-flex items-center justify-center gap-3 rounded-full bg-[#25D366] px-8 py-4 text-sm font-bold text-neutral-950 shadow-[0_0_30px_rgba(37,211,102,0.35)] transition-all duration-300 hover:scale-[1.02] hover:bg-[#20bd5a] hover:shadow-[0_0_40px_rgba(37,211,102,0.5)] active:scale-[0.98]"
                 >
                   <MessageCircle className="h-5 w-5 fill-current" />
-                  Notificar al equipo de Zenda por WhatsApp
+                  Notificar al equipo por WhatsApp
                 </a>
 
                 <Link
