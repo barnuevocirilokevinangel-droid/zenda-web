@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Eye, EyeOff, Loader2, Lock, Mail, ShieldCheck } from 'lucide-react';
 import { onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../../firebase.js';
+import { auth } from '../../firebase';
 import usePageMeta from '../../lib/usePageMeta.js';
 
 export default function AdminLogin() {
@@ -41,12 +41,10 @@ export default function AdminLogin() {
     setError('');
 
     try {
-      // Autenticación nativa directa con Firebase Auth
       await signInWithEmailAndPassword(auth, email.trim(), password);
       navigate('/admin', { replace: true });
     } catch (err) {
       console.warn('[Zenda Auth Error]:', err);
-      // Mensaje de error limpio requerido
       setError('Credenciales no autorizadas');
     } finally {
       setSubmitting(false);
@@ -75,7 +73,7 @@ export default function AdminLogin() {
           Volver a wearezenda.com
         </Link>
 
-        {/* Tarjeta de login */}
+        {/* Tarjeta de login ejecutiva minimalista oscura */}
         <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-8 shadow-2xl backdrop-blur-xl sm:p-10">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">

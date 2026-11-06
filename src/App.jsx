@@ -4,7 +4,6 @@ import { motion, useReducedMotion } from 'framer-motion';
 import PageLoader from './components/PageLoader.jsx';
 import ScrollManager from './components/ScrollManager.jsx';
 import SiteLayout from './components/SiteLayout.jsx';
-import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Home from './pages/Home.jsx';
 
 // Páginas secundarias con carga diferida (lazy) para maximizar la velocidad de la landing
@@ -14,7 +13,8 @@ const Privacy = lazy(() => import('./pages/Legal/Privacy.jsx'));
 const Reclamaciones = lazy(() => import('./pages/Legal/Reclamaciones.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
 
-// Panel de Control Interno (Zenda OS)
+// Panel de Control Interno (Zenda OS) con carga diferida
+const ProtectedRoute = lazy(() => import('./components/ProtectedRoute.jsx'));
 const AdminLogin = lazy(() => import('./pages/Admin/Login.jsx'));
 const AdminDashboard = lazy(() => import('./pages/Admin/Dashboard.jsx'));
 
