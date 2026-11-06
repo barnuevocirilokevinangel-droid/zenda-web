@@ -1,46 +1,47 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ArrowUpRight, Menu, X } from 'lucide-react';
 
 const NAV_LINKS = [
-  { label: 'SERVICIOS', href: '#verticales' },
-  { label: 'MÉTODO', href: '#metodo' },
-  { label: 'CASOS', href: '#casos' },
-  { label: 'CONTACTO', href: '#contacto' },
+  { label: 'SERVICIOS', to: '/#verticales' },
+  { label: 'MÉTODO', to: '/#metodo' },
+  { label: 'CASOS', to: '/#casos' },
+  { label: 'CONTACTO', to: '/#contacto' },
 ];
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-neutral-100 bg-white/90 backdrop-blur-md">
+    <header className="sticky top-0 z-50 w-full border-b border-neutral-100 bg-white/90 backdrop-blur-md print:hidden">
       <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6">
         {/* Logo */}
-        <a href="#" aria-label="Zenda — inicio" className="inline-flex items-center gap-2.5">
+        <Link to="/" aria-label="Zenda — inicio" className="inline-flex items-center gap-2.5">
           <img src="/isotipo-zenda.png" alt="" aria-hidden="true" className="h-7 w-auto object-contain" />
           <span className="text-xl font-bold tracking-tight text-zenda-dark">zenda</span>
-        </a>
+        </Link>
 
         {/* Links centrales */}
         <nav className="hidden items-center gap-10 md:flex" aria-label="Principal">
           {NAV_LINKS.map((link) => (
-            <a
+            <Link
               key={link.label}
-              href={link.href}
+              to={link.to}
               className="text-xs font-medium tracking-widest text-neutral-600 transition-colors hover:text-zenda-dark"
             >
               {link.label}
-            </a>
+            </Link>
           ))}
         </nav>
 
         {/* CTA */}
-        <a
-          href="#contacto"
+        <Link
+          to="/#contacto"
           className="group hidden items-center gap-1.5 rounded-full bg-zenda-dark px-6 py-3 text-xs font-semibold tracking-widest text-white transition-all duration-300 hover:scale-[1.02] hover:bg-zenda-blue active:scale-[0.98] hover:shadow-lg hover:shadow-zenda-blue/20 md:inline-flex"
         >
           ESCRÍBENOS
           <ArrowUpRight className="h-4 w-4 transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-zenda-cyan" />
-        </a>
+        </Link>
 
         {/* Toggle móvil */}
         <button
@@ -59,24 +60,24 @@ export default function Navbar() {
         <div className="space-y-4 border-t border-neutral-100 bg-white px-6 py-6 md:hidden">
           <nav className="flex flex-col gap-4" aria-label="Móvil">
             {NAV_LINKS.map((link) => (
-              <a
+              <Link
                 key={link.label}
-                href={link.href}
+                to={link.to}
                 onClick={() => setOpen(false)}
                 className="text-sm font-medium tracking-widest text-neutral-700"
               >
                 {link.label}
-              </a>
+              </Link>
             ))}
           </nav>
-          <a
-            href="#contacto"
+          <Link
+            to="/#contacto"
             onClick={() => setOpen(false)}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-zenda-dark px-6 py-3 text-xs font-semibold tracking-widest text-white transition-transform duration-300 active:scale-[0.98]"
           >
             ESCRÍBENOS
             <ArrowUpRight className="h-4 w-4 text-zenda-cyan" />
-          </a>
+          </Link>
         </div>
       )}
     </header>

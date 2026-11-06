@@ -13,6 +13,21 @@ export default function Hero() {
 
       <div className="mx-auto max-w-7xl px-6 pb-28 pt-24 md:pb-36 md:pt-32">
         <div className="mx-auto flex max-w-4xl flex-col items-center text-center">
+          {/* Live status badge */}
+          <TextReveal
+            as="a"
+            href="#contacto"
+            delay={0.05}
+            className="group mb-8 inline-flex items-center gap-2.5 rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-xs font-medium text-neutral-600 shadow-subtle backdrop-blur transition-all duration-300 hover:-translate-y-px hover:border-zenda-blue/40 hover:text-zenda-dark"
+          >
+            <span className="relative flex h-2 w-2" aria-hidden="true">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+            </span>
+            Disponibilidad Q4 2026: Diagnósticos abiertos
+            <ArrowUpRight className="h-3.5 w-3.5 text-neutral-400 transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-zenda-blue" />
+          </TextReveal>
+
           <TextReveal
             as="p"
             delay={0.1}

@@ -1,5 +1,6 @@
 import { ArrowUpRight, Megaphone, Workflow, LayoutDashboard } from 'lucide-react';
 import { StaggerGroup, StaggerItem } from './Stagger.jsx';
+import SpotlightCard from './SpotlightCard.jsx';
 import TextReveal from './TextReveal.jsx';
 
 const VERTICALS = [
@@ -39,9 +40,10 @@ function VerticalCard({ vertical }) {
   const { id, name, badge, icon: Icon, description, tags, href } = vertical;
 
   return (
-    <a
+    <SpotlightCard
+      as="a"
       href={href}
-      className="group relative flex w-full flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white transition-all duration-300 hover:-translate-y-[4px] hover:border-zenda-blue/30 hover:shadow-elevated"
+      className="group flex w-full flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white transition-all duration-300 hover:-translate-y-[4px] hover:border-zenda-blue/40 hover:shadow-elevated"
     >
       {/* Cabecera visual */}
       <div className="relative flex h-44 items-center justify-center overflow-hidden border-b border-slate-100 bg-neutral-50/70">
@@ -87,7 +89,7 @@ function VerticalCard({ vertical }) {
           </span>
         </div>
       </div>
-    </a>
+    </SpotlightCard>
   );
 }
 

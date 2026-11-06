@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion, useScroll, useTransform } from 'framer-motion';
 import {
   CatalogMockup,
   FunnelMockup,
@@ -30,6 +30,11 @@ export default function CaseGallery({ name, slides }) {
   const reduceMotion = useReducedMotion();
   const uid = useId();
   const tabRefs = useRef([]);
+  const stageRef = useRef(null);
+
+  // Parallax sutil: el contenido se desplaza ±10 px mientras la tarjeta cruza el viewport.
+  const { scrollYProgress } = useScroll({ target: stageRef, offset: ['start end', 'end start'] });
+  const parallaxY = useTransform(scrollYProgress, [0, 1], [-10, 10]);
 
   const slide = slides[active];
   const Fallback = FALLBACKS[slide.fallback];
@@ -67,6 +72,7 @@ export default function CaseGallery({ name, slides }) {
       ))}
 
       <div
+        ref={stageRef}
         role="tabpanel"
         id={`${uid}-panel`}
         aria-labelledby={`${uid}-tab-${active}`}
@@ -82,35 +88,43 @@ export default function CaseGallery({ name, slides }) {
           className="absolute -top-24 left-1/2 h-48 w-96 -translate-x-1/2 rounded-full bg-zenda-blue/40 blur-3xl"
         />
 
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={slide.id}
-            className="absolute inset-0"
-            initial={reduceMotion ? false : { opacity: 0, x: 16 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -16 }}
-            transition={{ duration: reduceMotion ? 0 : 0.3, ease: 'easeOut' }}
-          >
-            {hasImage ? (
-              <img
-                src={slide.src}
-                alt={`${name}: ${slide.title}`}
-                className={`absolute inset-0 h-full w-full ${
-                  slide.fit === 'contain' ? 'object-contain py-4' : 'object-cover object-top'
-                }`}
-              />
-            ) : (
-              <div aria-hidden="true" className="absolute inset-0">
-                <Fallback />
+        <motion.div
+          className="absolute -inset-3"
+          style={reduceMotion ? undefined : { y: parallaxY }}
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={slide.id}
+              className="absolute inset-0"
+              initial={reduceMotion ? false : { opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -16 }}
+              transition={{ duration: reduceMotion ? 0 : 0.3, ease: 'easeOut' }}
+            >
+              {/* Zoom suave del contenido multimedia al hacer hover */}
+              <div className="absolute inset-0 transition-transform duration-700 ease-out hover:scale-105">
+                {hasImage ? (
+                  <img
+                    src={slide.src}
+                    alt={`${name}: ${slide.title}`}
+                    className={`absolute inset-0 h-full w-full ${
+                      slide.fit === 'contain' ? 'object-contain py-4' : 'object-cover object-top'
+                    }`}
+                  />
+                ) : (
+                  <div aria-hidden="true" className="absolute inset-0">
+                    <Fallback />
+                  </div>
+                )}
               </div>
-            )}
 
-            <span className="absolute left-4 top-4 z-10 inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/40 px-3 py-1 text-[11px] font-medium text-white/90 backdrop-blur">
-              <span className="font-mono text-zenda-cyan">0{active + 1}</span>
-              {slide.title}
-            </span>
-          </motion.div>
-        </AnimatePresence>
+              <span className="pointer-events-none absolute left-7 top-7 z-10 inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/40 px-3 py-1 text-[11px] font-medium text-white/90 backdrop-blur">
+                <span className="font-mono text-zenda-cyan">0{active + 1}</span>
+                {slide.title}
+              </span>
+            </motion.div>
+          </AnimatePresence>
+        </motion.div>
       </div>
 
       {/* Pestañas / indicadores */}

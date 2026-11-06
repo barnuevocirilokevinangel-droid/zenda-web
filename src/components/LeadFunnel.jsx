@@ -8,6 +8,7 @@ import {
   Workflow,
 } from 'lucide-react';
 import ScrollReveal from './ScrollReveal.jsx';
+import TextReveal from './TextReveal.jsx';
 
 const BOTTLENECKS = [
   {
@@ -261,16 +262,27 @@ export default function LeadFunnel() {
           <div className="grid grid-cols-1 gap-12 lg:grid-cols-5 lg:gap-16">
             {/* Encabezado */}
             <div className="lg:col-span-2">
-              <p className="mb-5 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500">
+              <TextReveal
+                as="p"
+                className="mb-5 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500"
+              >
                 Iniciar proyecto
-              </p>
-              <h2 className="text-4xl font-bold tracking-tight text-zenda-dark sm:text-5xl">
+              </TextReveal>
+              <TextReveal
+                as="h2"
+                delay={0.08}
+                className="text-4xl font-bold tracking-tight text-zenda-dark sm:text-5xl"
+              >
                 Construyamos la infraestructura que tu marca necesita.
-              </h2>
-              <p className="mt-6 text-base leading-relaxed text-neutral-600 sm:text-lg">
+              </TextReveal>
+              <TextReveal
+                as="p"
+                delay={0.16}
+                className="mt-6 text-base leading-relaxed text-neutral-600 sm:text-lg"
+              >
                 Cuéntanos sobre tu negocio y te presentaremos un plan táctico de marketing y
                 automatización.
-              </p>
+              </TextReveal>
             </div>
 
             {/* Formulario */}

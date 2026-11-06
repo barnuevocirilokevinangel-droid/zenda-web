@@ -1,6 +1,8 @@
 import { AlertCircle, ArrowUpRight, Cpu, Gauge } from 'lucide-react';
 import CaseGallery from './CaseGallery.jsx';
-import ScrollReveal from './ScrollReveal.jsx';
+import SpotlightCard from './SpotlightCard.jsx';
+import { StaggerGroup, StaggerItem } from './Stagger.jsx';
+import TextReveal from './TextReveal.jsx';
 
 const CASES = [
   {
@@ -115,9 +117,10 @@ function CaseCard({ item }) {
   const { id, index, name, category, gallery, challenge, system, impact, cta } = item;
 
   return (
-    <article
+    <SpotlightCard
+      as="article"
       id={id}
-      className="group flex h-full flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white transition-all duration-300 hover:-translate-y-[4px] hover:border-zenda-blue/30 hover:shadow-[0_18px_40px_-12px_rgba(11,15,25,0.12)]"
+      className="group flex h-full flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white transition-all duration-300 hover:-translate-y-[4px] hover:border-zenda-blue/40 hover:shadow-[0_18px_40px_-12px_rgba(11,15,25,0.12)]"
     >
       {/* Barra superior estilo ficha técnica */}
       <div className="flex items-center justify-between border-b border-neutral-100 bg-neutral-50/70 px-6 py-3.5 sm:px-8">
@@ -199,7 +202,7 @@ function CaseCard({ item }) {
           </button>
         </div>
       </div>
-    </article>
+    </SpotlightCard>
   );
 }
 
@@ -207,26 +210,37 @@ export default function CaseStudies() {
   return (
     <section id="casos" className="border-t border-neutral-100 bg-gray-50/50 py-24 md:py-32">
       <div className="mx-auto max-w-7xl px-6">
-        <ScrollReveal className="max-w-3xl">
-          <p className="mb-5 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500">
+        <div className="max-w-3xl">
+          <TextReveal
+            as="p"
+            className="mb-5 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500"
+          >
             Casos de estudio
-          </p>
-          <h2 className="text-4xl font-bold tracking-tight text-zenda-dark sm:text-5xl">
+          </TextReveal>
+          <TextReveal
+            as="h2"
+            delay={0.08}
+            className="text-4xl font-bold tracking-tight text-zenda-dark sm:text-5xl"
+          >
             Casos de Estudio e Infraestructura en Producción
-          </h2>
-          <p className="mt-6 text-base leading-relaxed text-neutral-600 sm:text-lg">
+          </TextReveal>
+          <TextReveal
+            as="p"
+            delay={0.16}
+            className="mt-6 text-base leading-relaxed text-neutral-600 sm:text-lg"
+          >
             Marketing visual y software operando juntos en negocios reales: del cuello de botella
             a la arquitectura que lo resuelve.
-          </p>
-        </ScrollReveal>
-
-        <div className="mt-16 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {CASES.map((item, i) => (
-            <ScrollReveal key={item.id} delay={0.1 + i * 0.12} className="h-full">
-              <CaseCard item={item} />
-            </ScrollReveal>
-          ))}
+          </TextReveal>
         </div>
+
+        <StaggerGroup className="mt-16 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {CASES.map((item) => (
+            <StaggerItem key={item.id} className="h-full">
+              <CaseCard item={item} />
+            </StaggerItem>
+          ))}
+        </StaggerGroup>
       </div>
     </section>
   );

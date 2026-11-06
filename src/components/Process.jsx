@@ -1,4 +1,6 @@
+import AnimatedCounter from './AnimatedCounter.jsx';
 import ScrollReveal from './ScrollReveal.jsx';
+import TextReveal from './TextReveal.jsx';
 
 const STEPS = [
   {
@@ -25,14 +27,21 @@ export default function Process() {
   return (
     <section id="metodo" className="bg-white py-24 md:py-32">
       <div className="mx-auto max-w-7xl px-6">
-        <ScrollReveal className="max-w-3xl">
-          <p className="mb-5 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500">
+        <div className="max-w-3xl">
+          <TextReveal
+            as="p"
+            className="mb-5 text-xs font-medium uppercase tracking-[0.25em] text-neutral-500"
+          >
             Cómo trabajamos
-          </p>
-          <h2 className="text-4xl font-bold tracking-tight text-zenda-dark sm:text-5xl">
+          </TextReveal>
+          <TextReveal
+            as="h2"
+            delay={0.08}
+            className="text-4xl font-bold tracking-tight text-zenda-dark sm:text-5xl"
+          >
             De la auditoría a la ejecución sin fricción.
-          </h2>
-        </ScrollReveal>
+          </TextReveal>
+        </div>
 
         <ScrollReveal as="ol" delay={0.08} className="relative mt-20 grid grid-cols-1 gap-14 md:grid-cols-3 md:gap-10">
           {/* Línea conectora (solo escritorio) */}
@@ -44,7 +53,7 @@ export default function Process() {
           {STEPS.map((step) => (
             <li key={step.number} className="relative">
               <span className="block text-7xl font-bold leading-none tracking-tighter text-neutral-200 sm:text-8xl">
-                {step.number}
+                <AnimatedCounter to={Number(step.number)} pad={2} />
               </span>
               {/* Nodo sobre la línea */}
               <span

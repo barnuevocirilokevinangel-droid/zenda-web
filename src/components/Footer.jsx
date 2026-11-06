@@ -1,29 +1,35 @@
+import { Link } from 'react-router-dom';
+import { BookOpen } from 'lucide-react';
+
 const QUICK_LINKS = [
-  { label: 'Servicios', href: '#verticales' },
-  { label: 'Método', href: '#metodo' },
-  { label: 'Casos', href: '#casos' },
-  { label: 'Contacto', href: '#contacto' },
+  { label: 'Servicios', to: '/#verticales' },
+  { label: 'Método', to: '/#metodo' },
+  { label: 'Casos', to: '/#casos' },
+  { label: 'Diagnóstico 60s', to: '/#contacto' },
+  { label: 'Portal Clientes', to: '/onboarding' },
 ];
 
 const LEGAL_LINKS = [
-  { label: 'Privacidad', href: '#' },
-  { label: 'Términos', href: '#' },
+  { label: 'Términos y Condiciones', to: '/terminos' },
+  { label: 'Política de Privacidad', to: '/privacidad' },
+  { label: 'Libro de Reclamaciones', to: '/reclamaciones', icon: BookOpen },
 ];
 
-const linkClasses = 'text-sm text-neutral-400 transition-colors hover:text-white';
+const linkClasses =
+  'inline-flex items-center gap-2 text-sm text-neutral-400 transition-colors hover:text-white';
 
 export default function Footer() {
   return (
-    <footer className="bg-zenda-dark">
+    <footer className="bg-zenda-dark print:hidden">
       <div className="mx-auto max-w-7xl px-6 py-16 md:py-20">
         <div className="grid grid-cols-1 gap-12 md:grid-cols-3">
           <div className="md:col-span-1">
-            <a href="#" aria-label="Zenda — inicio" className="inline-flex items-center gap-2.5">
+            <Link to="/" aria-label="Zenda — inicio" className="inline-flex items-center gap-2.5">
               <img src="/isotipo-zenda.png" alt="" aria-hidden="true" className="h-7 w-auto object-contain" />
               <span className="text-xl font-bold tracking-tight text-white">zenda</span>
-            </a>
+            </Link>
             <p className="mt-5 max-w-xs text-sm leading-relaxed text-neutral-400">
-              Agencia de marketing e ingeniería de operaciones.
+              Agencia de marketing digital, desarrollo de software e ingeniería de operaciones. Dominio oficial wearezenda.com
             </p>
           </div>
 
@@ -34,9 +40,9 @@ export default function Footer() {
             <ul className="mt-5 space-y-3">
               {QUICK_LINKS.map((link) => (
                 <li key={link.label}>
-                  <a href={link.href} className={linkClasses}>
+                  <Link to={link.to} className={linkClasses}>
                     {link.label}
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -47,11 +53,12 @@ export default function Footer() {
               Legal
             </h2>
             <ul className="mt-5 space-y-3">
-              {LEGAL_LINKS.map((link) => (
-                <li key={link.label}>
-                  <a href={link.href} className={linkClasses}>
-                    {link.label}
-                  </a>
+              {LEGAL_LINKS.map(({ label, to, icon: Icon }) => (
+                <li key={label}>
+                  <Link to={to} className={linkClasses}>
+                    {Icon && <Icon className="h-4 w-4" aria-hidden="true" />}
+                    {label}
+                  </Link>
                 </li>
               ))}
             </ul>
