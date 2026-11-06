@@ -1,10 +1,23 @@
+import { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
+import { onAuthStateChanged } from 'firebase/auth';
 import { Loader2 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext.jsx';
+import { auth } from '../firebase.js';
 
 export default function ProtectedRoute({ children }) {
-  const { user, loading } = useAuth();
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
   const location = useLocation();
+
+  useEffect(() => {
+    // Escucha en tiempo real la sesión activa de Firebase Authentication
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   if (loading) {
     return (

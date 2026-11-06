@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -23,8 +24,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext.jsx';
-import { db, isFirebaseConfigured } from '../../firebase.js';
+import { auth, db, isFirebaseConfigured } from '../../firebase.js';
 import usePageMeta from '../../lib/usePageMeta.js';
 import { buildWhatsAppLink } from '../../lib/whatsapp.js';
 
@@ -147,7 +147,20 @@ export default function AdminDashboard() {
     noindex: true,
   });
 
-  const { user, logout } = useAuth();
+  const [currentUser, setCurrentUser] = useState(auth?.currentUser || null);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => setCurrentUser(u));
+    return () => unsub();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.warn('[Zenda signOut Error]:', err);
+    }
+  };
 
   const [activeTab, setActiveTab] = useState('clients'); // clients | finances | content | goals
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -598,12 +611,12 @@ export default function AdminDashboard() {
 
           <div className="flex items-center justify-between rounded-xl bg-white/[0.02] p-3 text-xs">
             <div className="truncate">
-              <p className="font-semibold text-white">{user?.displayName || 'Fundador'}</p>
-              <p className="truncate text-[11px] text-neutral-400">{user?.email}</p>
+              <p className="font-semibold text-white">{currentUser?.displayName || 'Fundador'}</p>
+              <p className="truncate text-[11px] text-neutral-400">{currentUser?.email || 'fundador@wearezenda.com'}</p>
             </div>
             <button
               type="button"
-              onClick={logout}
+              onClick={handleLogout}
               title="Cerrar Sesión (signOut)"
               className="rounded-lg p-1.5 text-neutral-400 hover:bg-white/10 hover:text-red-400 transition-colors"
             >
@@ -641,7 +654,7 @@ export default function AdminDashboard() {
 
             <button
               type="button"
-              onClick={logout}
+              onClick={handleLogout}
               className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-1.5 font-mono text-xs font-semibold text-neutral-300 transition-all hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-300"
             >
               <LogOut className="h-3.5 w-3.5" />

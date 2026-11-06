@@ -1,19 +1,18 @@
-import { useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Eye, EyeOff, Loader2, Lock, Mail, ShieldCheck } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext.jsx';
+import { onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../../firebase.js';
 import usePageMeta from '../../lib/usePageMeta.js';
 
 export default function AdminLogin() {
   usePageMeta({
-    title: 'Zenda Admin · Acceso Fundadores',
+    title: 'Zenda OS · Acceso Fundadores',
     description: 'Portal de administración y gestión interna de Zenda.',
     noindex: true,
   });
 
-  const { user, login, isFirebaseConfigured } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -21,16 +20,20 @@ export default function AdminLogin() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  // Si ya tiene sesión, redirige a /admin
-  const from = location.state?.from?.pathname || '/admin';
-  if (user) {
-    return <Navigate to={from} replace />;
-  }
+  // Si ya existe sesión activa en Firebase, redirige inmediatamente a /admin
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) {
+        navigate('/admin', { replace: true });
+      }
+    });
+    return () => unsubscribe();
+  }, [navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!email.trim() || !password) {
-      setError('Por favor ingresa tu correo y contraseña.');
+      setError('Credenciales no autorizadas');
       return;
     }
 
@@ -38,21 +41,13 @@ export default function AdminLogin() {
     setError('');
 
     try {
-      await login(email, password);
-      navigate(from, { replace: true });
+      // Autenticación nativa directa con Firebase Auth
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+      navigate('/admin', { replace: true });
     } catch (err) {
-      console.warn('[Admin Login Error]:', err);
-      let msg = 'Error al iniciar sesión. Verifica tus credenciales.';
-      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
-        msg = 'Contraseña o correo electrónico incorrectos.';
-      } else if (err.code === 'auth/user-not-found') {
-        msg = 'No existe una cuenta registrada con este correo.';
-      } else if (err.code === 'auth/too-many-requests') {
-        msg = 'Demasiados intentos fallidos. Intenta más tarde.';
-      } else if (err.message) {
-        msg = err.message;
-      }
-      setError(msg);
+      console.warn('[Zenda Auth Error]:', err);
+      // Mensaje de error limpio requerido
+      setError('Credenciales no autorizadas');
     } finally {
       setSubmitting(false);
     }
@@ -92,7 +87,7 @@ export default function AdminLogin() {
               <div>
                 <span className="text-xl font-bold tracking-tight text-white">zenda</span>
                 <span className="ml-2 rounded-md border border-zenda-cyan/30 bg-zenda-cyan/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-zenda-cyan">
-                  admin
+                  OS
                 </span>
               </div>
             </div>
@@ -105,15 +100,6 @@ export default function AdminLogin() {
           <p className="mt-2 text-xs leading-relaxed text-neutral-400">
             Panel de control operativo, finanzas, métricas y pipeline de clientes.
           </p>
-
-          {!isFirebaseConfigured && (
-            <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-200">
-              <p className="font-semibold">Modo Desarrollo Activo:</p>
-              <p className="mt-0.5 text-amber-300/80">
-                Firebase sin credenciales en .env. Puedes ingresar con cualquier correo (ej. <code>admin@wearezenda.com</code>) y clave temporal para probar el panel.
-              </p>
-            </div>
-          )}
 
           {error && (
             <div
