@@ -42,6 +42,52 @@ const getCurrentWeekLabel = () => {
   return `Semana ${Math.ceil(now.getDate() / 7)} · Nov ${now.getFullYear()}`;
 };
 
+/**
+ * Cálculo dinámico de fecha para tareas de sprint:
+ * "Vence hoy", "Vence mañana", "En X días", o "Atrasada (X d)" en rojo tenue.
+ */
+function getDeadlineStatus(deadlineStr, todayDateStr) {
+  if (!deadlineStr) {
+    return {
+      label: 'Sin fecha',
+      colorClass: 'text-slate-500 bg-slate-100 border-slate-200',
+    };
+  }
+
+  if (deadlineStr === todayDateStr) {
+    return {
+      label: 'Vence hoy',
+      isToday: true,
+      colorClass: 'text-amber-800 bg-amber-50 border-amber-200 font-semibold',
+    };
+  }
+
+  const [y1, m1, d1] = deadlineStr.split('-').map(Number);
+  const [y2, m2, d2] = todayDateStr.split('-').map(Number);
+  const t1 = Date.UTC(y1, m1 - 1, d1);
+  const t2 = Date.UTC(y2, m2 - 1, d2);
+  const diffDays = Math.round((t1 - t2) / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0) {
+    const abs = Math.abs(diffDays);
+    return {
+      label: abs === 1 ? 'Atrasada (ayer)' : `Atrasada (${abs}d)`,
+      isOverdue: true,
+      colorClass: 'text-rose-700 bg-rose-50 border-rose-200 font-semibold',
+    };
+  }
+  if (diffDays === 1) {
+    return {
+      label: 'Vence mañana',
+      colorClass: 'text-sky-700 bg-sky-50 border-sky-200 font-medium',
+    };
+  }
+  return {
+    label: `En ${diffDays} días`,
+    colorClass: 'text-slate-600 bg-slate-100 border-slate-200',
+  };
+}
+
 // ============================================================================
 // DATOS INICIALES MOCK (FALLBACK INTELIGENTE)
 // ============================================================================
@@ -228,7 +274,7 @@ const INITIAL_MOCK_CALENDAR = [
     id: 'cal-1',
     title: 'Rodaje Presencial: Set de 8 Reels de Adquisición',
     client: 'Valkiria Fitness Club',
-    type: 'Rodaje presencial', // 'Rodaje presencial' | 'Publicación / Entrega' | 'Cobro / Facturación' | 'Reunión / Sync'
+    type: 'Rodaje presencial',
     date: '2026-11-15',
     time: '10:00',
     assignee: 'Angel',
@@ -346,19 +392,19 @@ export default function AdminDashboard() {
     }
   };
 
-  // 4 Secciones principales según especificación:
-  // 'command' (Command Center) | 'pipeline' (Pipeline de Contenido) | 'calendar' (Calendario & Rodajes) | 'finances' (Finanzas & Clientes)
+  // 4 Secciones principales:
+  // 'command' | 'pipeline' | 'calendar' | 'finances'
   const [activeTab, setActiveTab] = useState('command');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Estados de colecciones
+  // Estados de datos
   const [sprints, setSprints] = useState(INITIAL_MOCK_SPRINTS);
   const [clients, setClients] = useState(INITIAL_MOCK_CLIENTS);
   const [contentList, setContentList] = useState(INITIAL_MOCK_CONTENT);
   const [calendarEvents, setCalendarEvents] = useState(INITIAL_MOCK_CALENDAR);
   const [finances, setFinances] = useState(INITIAL_MOCK_FINANCES);
 
-  // Modales y formularios
+  // Modales
   const [sprintModalOpen, setSprintModalOpen] = useState(false);
   const [newSprint, setNewSprint] = useState(() => ({
     title: '',
@@ -405,13 +451,14 @@ export default function AdminDashboard() {
   const [contentStageFilter, setContentStageFilter] = useState('all');
   const [calendarTypeFilter, setCalendarTypeFilter] = useState('all');
   const [clientSearch, setClientSearch] = useState('');
-  const [clientFilter, setClientFilter] = useState('all'); // all | onboarding | leads
-  const [financeSubTab, setFinanceSubTab] = useState('clients'); // clients | ledger
+  const [clientFilter, setClientFilter] = useState('all');
+  const [financeSubTab, setFinanceSubTab] = useState('clients');
 
   // Estado del calendario mensual
   const [currentCalendarDate, setCurrentCalendarDate] = useState(() => new Date());
   const [selectedCalendarDay, setSelectedCalendarDay] = useState(null);
   const weekLabel = useMemo(() => getCurrentWeekLabel(), []);
+  const todayDateStr = useMemo(() => getTodayDate(), []);
 
   // ============================================================================
   // SINCRONIZACIÓN EN TIEMPO REAL CON FIRESTORE (onSnapshot)
@@ -934,11 +981,11 @@ export default function AdminDashboard() {
     return matchesType && matchesDay;
   });
 
-  // Días del mes actual para el mini-calendario interactivo
+  // Días del mes actual
   const calendarDays = useMemo(() => {
     const year = currentCalendarDate.getFullYear();
     const month = currentCalendarDate.getMonth();
-    const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7; // Lunes = 0
+    const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7;
     const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
 
     const days = [];
@@ -976,7 +1023,7 @@ export default function AdminDashboard() {
     .reduce((acc, f) => acc + Number(f.amount || 0), 0);
   const netUSD = totalIncomeUSD - totalExpenseUSD;
 
-  // Filtrado de clientes (Pestaña Finanzas & Clientes)
+  // Filtrado de clientes
   const filteredClients = clients.filter((c) => {
     const matchesSearch =
       (c.businessName || '').toLowerCase().includes(clientSearch.toLowerCase()) ||
@@ -987,96 +1034,86 @@ export default function AdminDashboard() {
     return matchesSearch;
   });
 
-  // Helpers de estilos
+  // Helpers de estilos para Light Workspace
   const getHealthBadge = (health) => {
     switch (health) {
       case 'En ritmo':
-        return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.15)]';
+        return 'border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm';
       case 'Requiere atención':
-        return 'border-amber-400/40 bg-amber-400/10 text-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.15)]';
+        return 'border-amber-200 bg-amber-50 text-amber-800 shadow-sm';
       case 'Demorado':
-        return 'border-rose-500/40 bg-rose-500/10 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.15)]';
+        return 'border-rose-200 bg-rose-50 text-rose-700 shadow-sm';
       default:
-        return 'border-white/10 bg-white/5 text-neutral-300';
+        return 'border-slate-200 bg-slate-50 text-slate-700';
     }
   };
 
   const getPriorityBadge = (priority) => {
     switch (priority) {
       case 'Urgente':
-        return 'border-rose-500/40 bg-rose-500/15 text-rose-300';
+        return 'border-rose-200 bg-rose-50 text-rose-700 font-semibold';
       case 'Alta':
-        return 'border-amber-400/40 bg-amber-400/15 text-amber-300';
+        return 'border-amber-200 bg-amber-50 text-amber-800 font-medium';
       case 'Media':
-        return 'border-zenda-cyan/30 bg-zenda-cyan/10 text-zenda-cyan';
+        return 'border-sky-200 bg-sky-50 text-sky-700';
       default:
-        return 'border-white/10 bg-white/5 text-neutral-400';
+        return 'border-slate-200 bg-slate-100 text-slate-600';
     }
   };
 
   const getStageBadge = (stage) => {
     switch (stage) {
       case 'Guion listo':
-        return 'border-blue-400/40 bg-blue-500/10 text-blue-300';
+        return 'border-blue-200 bg-blue-50 text-blue-700 font-medium';
       case 'Por grabar':
-        return 'border-amber-400/40 bg-amber-400/10 text-amber-300';
+        return 'border-amber-200 bg-amber-50 text-amber-800 font-medium';
       case 'En edición / Agente':
-        return 'border-purple-400/40 bg-purple-400/10 text-purple-300';
+        return 'border-purple-200 bg-purple-50 text-purple-700 font-medium';
       case 'Aprobado':
-        return 'border-cyan-400/40 bg-cyan-400/10 text-cyan-300';
+        return 'border-cyan-200 bg-cyan-50 text-cyan-800 font-medium';
       case 'Publicado':
-        return 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300';
+        return 'border-emerald-200 bg-emerald-50 text-emerald-700 font-semibold';
       default:
-        return 'border-white/10 bg-white/5 text-neutral-300';
+        return 'border-slate-200 bg-slate-50 text-slate-700';
     }
   };
 
   const getCalendarTypeBadge = (type) => {
     switch (type) {
       case 'Rodaje presencial':
-        return 'border-purple-400/40 bg-purple-500/15 text-purple-300';
+        return 'border-purple-200 bg-purple-50 text-purple-700';
       case 'Publicación / Entrega':
-        return 'border-zenda-cyan/40 bg-zenda-cyan/15 text-zenda-cyan';
+        return 'border-sky-200 bg-sky-50 text-sky-700';
       case 'Cobro / Facturación':
-        return 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300';
+        return 'border-emerald-200 bg-emerald-50 text-emerald-700';
       case 'Reunión / Sync':
-        return 'border-amber-400/40 bg-amber-500/15 text-amber-300';
+        return 'border-amber-200 bg-amber-50 text-amber-800';
       default:
-        return 'border-white/10 bg-white/5 text-neutral-300';
+        return 'border-slate-200 bg-slate-100 text-slate-700';
     }
   };
 
   return (
-    <div className="flex min-h-screen bg-[#070A0F] font-sans text-neutral-100 antialiased selection:bg-zenda-cyan selection:text-black">
-      {/* Luces sutiles de fondo (Linear/Vercel aesthetic) */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed -top-40 right-1/4 h-[380px] w-[540px] rounded-full bg-zenda-blue/12 blur-[170px]"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed bottom-0 left-10 h-[300px] w-[450px] rounded-full bg-zenda-cyan/8 blur-[160px]"
-      />
-
+    <div className="flex min-h-screen bg-[#F8FAFC] font-sans text-slate-900 antialiased selection:bg-cyan-500 selection:text-white">
       {/* ==================================================================== */}
-      {/* SIDEBAR DESKTOP */}
+      {/* SIDEBAR DARK (#09090B) */}
       {/* ==================================================================== */}
-      <aside className="hidden w-64 flex-col border-r border-white/5 bg-[#090D15]/80 p-5 backdrop-blur-2xl md:flex">
+      <aside className="hidden w-64 flex-col border-r border-[#27272A] bg-[#09090B] p-5 md:flex select-none">
         {/* Marca & Status */}
         <div className="flex items-center justify-between px-2">
           <div className="flex items-center gap-2.5">
             <img src="/isotipo-zenda.png" alt="Zenda" className="h-6 w-auto object-contain brightness-110" />
             <span className="text-base font-bold tracking-tight text-white">zenda</span>
-            <span className="rounded border border-zenda-cyan/40 bg-zenda-cyan/10 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest text-zenda-cyan shadow-[0_0_8px_rgba(0,229,255,0.2)]">
+            <span className="rounded border border-zenda-cyan/50 bg-zenda-cyan/15 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest text-zenda-cyan">
               OS
             </span>
           </div>
         </div>
 
-        <div className="mt-2 px-2">
-          <div className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-1 font-mono text-[10px] text-neutral-400">
+        <div className="mt-3 px-2">
+          <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2.5 py-1.5 font-mono text-[10px] text-zinc-400">
             <span className={`h-2 w-2 rounded-full ${isFirebaseConfigured ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-amber-400'}`} />
-            <span className="truncate">{isFirebaseConfigured ? 'Live Cloud Sync' : 'Modo Mock'}</span>
+            <span className="truncate">{isFirebaseConfigured ? 'Cloud Sync Activo' : 'Modo Mock'}</span>
           </div>
         </div>
 
@@ -1086,17 +1123,17 @@ export default function AdminDashboard() {
           <button
             type="button"
             onClick={() => setActiveTab('command')}
-            className={`flex w-full items-center justify-between rounded-xl px-3.5 py-3 text-xs font-mono font-semibold uppercase tracking-wider transition-all ${
+            className={`flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-mono font-medium tracking-wide transition-all ${
               activeTab === 'command'
-                ? 'border border-zenda-cyan/40 bg-zenda-cyan/10 text-white shadow-[0_0_20px_rgba(0,229,255,0.15)]'
-                : 'text-neutral-400 hover:bg-white/[0.03] hover:text-white'
+                ? 'bg-white/10 text-white font-semibold'
+                : 'text-[#A1A1AA] hover:bg-white/[0.04] hover:text-white'
             }`}
           >
             <div className="flex items-center gap-3">
-              <LayoutDashboard className={`h-4 w-4 ${activeTab === 'command' ? 'text-zenda-cyan' : 'text-neutral-400'}`} />
+              <LayoutDashboard className={`h-4 w-4 ${activeTab === 'command' ? 'text-zenda-cyan' : 'text-zinc-400'}`} />
               <span>Command Center</span>
             </div>
-            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-mono text-neutral-300">
+            <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-mono text-zinc-300">
               {sprints.filter((s) => !s.completed).length}
             </span>
           </button>
@@ -1105,17 +1142,17 @@ export default function AdminDashboard() {
           <button
             type="button"
             onClick={() => setActiveTab('pipeline')}
-            className={`flex w-full items-center justify-between rounded-xl px-3.5 py-3 text-xs font-mono font-semibold uppercase tracking-wider transition-all ${
+            className={`flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-mono font-medium tracking-wide transition-all ${
               activeTab === 'pipeline'
-                ? 'border border-zenda-cyan/40 bg-zenda-cyan/10 text-white shadow-[0_0_20px_rgba(0,229,255,0.15)]'
-                : 'text-neutral-400 hover:bg-white/[0.03] hover:text-white'
+                ? 'bg-white/10 text-white font-semibold'
+                : 'text-[#A1A1AA] hover:bg-white/[0.04] hover:text-white'
             }`}
           >
             <div className="flex items-center gap-3">
-              <Film className={`h-4 w-4 ${activeTab === 'pipeline' ? 'text-zenda-cyan' : 'text-purple-400'}`} />
+              <Film className={`h-4 w-4 ${activeTab === 'pipeline' ? 'text-purple-400' : 'text-zinc-400'}`} />
               <span>Pipeline de Contenido</span>
             </div>
-            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-mono text-neutral-300">
+            <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-mono text-zinc-300">
               {contentList.length}
             </span>
           </button>
@@ -1124,17 +1161,17 @@ export default function AdminDashboard() {
           <button
             type="button"
             onClick={() => setActiveTab('calendar')}
-            className={`flex w-full items-center justify-between rounded-xl px-3.5 py-3 text-xs font-mono font-semibold uppercase tracking-wider transition-all ${
+            className={`flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-mono font-medium tracking-wide transition-all ${
               activeTab === 'calendar'
-                ? 'border border-zenda-cyan/40 bg-zenda-cyan/10 text-white shadow-[0_0_20px_rgba(0,229,255,0.15)]'
-                : 'text-neutral-400 hover:bg-white/[0.03] hover:text-white'
+                ? 'bg-white/10 text-white font-semibold'
+                : 'text-[#A1A1AA] hover:bg-white/[0.04] hover:text-white'
             }`}
           >
             <div className="flex items-center gap-3">
-              <CalendarIcon className={`h-4 w-4 ${activeTab === 'calendar' ? 'text-zenda-cyan' : 'text-cyan-400'}`} />
+              <CalendarIcon className={`h-4 w-4 ${activeTab === 'calendar' ? 'text-cyan-400' : 'text-zinc-400'}`} />
               <span>Calendario & Rodajes</span>
             </div>
-            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-mono text-neutral-300">
+            <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-mono text-zinc-300">
               {calendarEvents.filter((e) => !e.completed).length}
             </span>
           </button>
@@ -1143,28 +1180,28 @@ export default function AdminDashboard() {
           <button
             type="button"
             onClick={() => setActiveTab('finances')}
-            className={`flex w-full items-center justify-between rounded-xl px-3.5 py-3 text-xs font-mono font-semibold uppercase tracking-wider transition-all ${
+            className={`flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-mono font-medium tracking-wide transition-all ${
               activeTab === 'finances'
-                ? 'border border-zenda-cyan/40 bg-zenda-cyan/10 text-white shadow-[0_0_20px_rgba(0,229,255,0.15)]'
-                : 'text-neutral-400 hover:bg-white/[0.03] hover:text-white'
+                ? 'bg-white/10 text-white font-semibold'
+                : 'text-[#A1A1AA] hover:bg-white/[0.04] hover:text-white'
             }`}
           >
             <div className="flex items-center gap-3">
-              <Wallet className={`h-4 w-4 ${activeTab === 'finances' ? 'text-zenda-cyan' : 'text-emerald-400'}`} />
+              <Wallet className={`h-4 w-4 ${activeTab === 'finances' ? 'text-emerald-400' : 'text-zinc-400'}`} />
               <span>Finanzas & Clientes</span>
             </div>
-            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-mono text-neutral-300">
+            <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-mono text-zinc-300">
               {clients.length}
             </span>
           </button>
         </nav>
 
         {/* Footer Sidebar */}
-        <div className="space-y-3 border-t border-white/5 pt-4">
+        <div className="space-y-3 border-t border-[#27272A] pt-4">
           <Link
             to="/"
             target="_blank"
-            className="flex items-center justify-between rounded-xl px-3 py-2 text-xs text-neutral-400 transition-colors hover:bg-white/[0.04] hover:text-white"
+            className="flex items-center justify-between rounded-xl px-3 py-2 text-xs text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-white"
           >
             <span className="flex items-center gap-2">
               <Globe className="h-3.5 w-3.5" />
@@ -1173,16 +1210,16 @@ export default function AdminDashboard() {
             <ExternalLink className="h-3 w-3" />
           </Link>
 
-          <div className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs">
+          <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 text-xs">
             <div className="truncate">
               <p className="font-semibold text-white">{currentUser?.displayName || 'Equipo Fundador'}</p>
-              <p className="truncate font-mono text-[11px] text-neutral-400">{currentUser?.email || 'admin@wearezenda.com'}</p>
+              <p className="truncate font-mono text-[11px] text-zinc-400">{currentUser?.email || 'admin@wearezenda.com'}</p>
             </div>
             <button
               type="button"
               onClick={handleLogout}
               title="Cerrar Sesión"
-              className="rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-white/10 hover:text-red-400"
+              className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-white/10 hover:text-rose-400"
             >
               <LogOut className="h-4 w-4" />
             </button>
@@ -1191,23 +1228,23 @@ export default function AdminDashboard() {
       </aside>
 
       {/* ==================================================================== */}
-      {/* ÁREA DE CONTENIDO PRINCIPAL */}
+      {/* CONTENIDO PRINCIPAL: LIGHT WORKSPACE */}
       {/* ==================================================================== */}
       <div className="flex flex-1 flex-col overflow-y-auto">
-        {/* Header Superior */}
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/5 bg-[#070A0F]/85 px-6 backdrop-blur-xl">
+        {/* Header Superior Blanco */}
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[#E2E8F0] bg-white px-6 shadow-sm">
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="rounded-lg p-2 text-neutral-400 hover:bg-white/5 hover:text-white md:hidden"
+              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 md:hidden"
             >
               {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
             <div className="flex items-center gap-2">
-              <span className="font-mono text-xs font-bold uppercase tracking-widest text-zenda-cyan">ZENDA OS</span>
-              <span className="text-neutral-600">/</span>
-              <h1 className="font-mono text-xs font-semibold uppercase tracking-wider text-white">
+              <span className="font-mono text-xs font-bold uppercase tracking-widest text-cyan-600">ZENDA OS</span>
+              <span className="text-slate-300">/</span>
+              <h1 className="font-mono text-xs font-semibold uppercase tracking-wider text-[#0F172A]">
                 {activeTab === 'command' && 'Command Center · Foco Semanal & Cuentas'}
                 {activeTab === 'pipeline' && 'Pipeline Audiovisual · Reels & Contenido'}
                 {activeTab === 'calendar' && 'Calendario Operativo · Rodajes, Publicaciones & Cobros'}
@@ -1217,15 +1254,15 @@ export default function AdminDashboard() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.02] px-3 py-1 font-mono text-[11px] text-neutral-400 sm:flex">
-              <Clock className="h-3 w-3 text-neutral-500" />
+            <div className="hidden items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-mono text-[11px] text-slate-600 sm:flex">
+              <Clock className="h-3 w-3 text-slate-400" />
               <span>{weekLabel}</span>
             </div>
 
             <button
               type="button"
               onClick={handleLogout}
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-1.5 font-mono text-xs font-semibold text-neutral-300 transition-all hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-300"
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 font-mono text-xs font-semibold text-slate-700 transition-all hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 shadow-sm"
             >
               <LogOut className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Cerrar Sesión</span>
@@ -1235,7 +1272,7 @@ export default function AdminDashboard() {
 
         {/* Mobile menu dropdown */}
         {mobileMenuOpen && (
-          <div className="border-b border-white/10 bg-[#090D15] p-4 md:hidden">
+          <div className="border-b border-[#27272A] bg-[#09090B] p-4 text-white md:hidden">
             <div className="space-y-1.5">
               <button
                 type="button"
@@ -1244,11 +1281,11 @@ export default function AdminDashboard() {
                   setMobileMenuOpen(false);
                 }}
                 className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-xs font-mono font-semibold uppercase ${
-                  activeTab === 'command' ? 'bg-zenda-cyan/15 text-zenda-cyan' : 'text-neutral-300'
+                  activeTab === 'command' ? 'bg-white/10 text-white' : 'text-zinc-400'
                 }`}
               >
                 <span>Command Center</span>
-                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px]">{sprints.filter((s) => !s.completed).length}</span>
+                <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px]">{sprints.filter((s) => !s.completed).length}</span>
               </button>
               <button
                 type="button"
@@ -1257,11 +1294,11 @@ export default function AdminDashboard() {
                   setMobileMenuOpen(false);
                 }}
                 className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-xs font-mono font-semibold uppercase ${
-                  activeTab === 'pipeline' ? 'bg-zenda-cyan/15 text-zenda-cyan' : 'text-neutral-300'
+                  activeTab === 'pipeline' ? 'bg-white/10 text-white' : 'text-zinc-400'
                 }`}
               >
                 <span>Pipeline de Contenido</span>
-                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px]">{contentList.length}</span>
+                <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px]">{contentList.length}</span>
               </button>
               <button
                 type="button"
@@ -1270,11 +1307,11 @@ export default function AdminDashboard() {
                   setMobileMenuOpen(false);
                 }}
                 className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-xs font-mono font-semibold uppercase ${
-                  activeTab === 'calendar' ? 'bg-zenda-cyan/15 text-zenda-cyan' : 'text-neutral-300'
+                  activeTab === 'calendar' ? 'bg-white/10 text-white' : 'text-zinc-400'
                 }`}
               >
                 <span>Calendario & Rodajes</span>
-                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px]">{calendarEvents.length}</span>
+                <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px]">{calendarEvents.length}</span>
               </button>
               <button
                 type="button"
@@ -1283,11 +1320,11 @@ export default function AdminDashboard() {
                   setMobileMenuOpen(false);
                 }}
                 className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-xs font-mono font-semibold uppercase ${
-                  activeTab === 'finances' ? 'bg-zenda-cyan/15 text-zenda-cyan' : 'text-neutral-300'
+                  activeTab === 'finances' ? 'bg-white/10 text-white' : 'text-zinc-400'
                 }`}
               >
                 <span>Finanzas & Clientes</span>
-                <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px]">{clients.length}</span>
+                <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px]">{clients.length}</span>
               </button>
             </div>
           </div>
@@ -1300,102 +1337,102 @@ export default function AdminDashboard() {
           {/* ================================================================== */}
           {activeTab === 'command' && (
             <div className="space-y-8">
-              {/* Tarjetas KPI de Pulso Rápido */}
+              {/* Tarjetas KPI Superiores (Fondo Blanco, Sombra Suave, Texto Alto Contraste) */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {/* KPI 1: Sprint */}
-                <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 backdrop-blur-xl">
-                  <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-neutral-400">
+                <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-[#64748B]">
                     <span>Sprint Semanal</span>
-                    <Sparkles className="h-4 w-4 text-zenda-cyan" />
+                    <Sparkles className="h-4 w-4 text-cyan-600" />
                   </div>
                   <div className="mt-3 flex items-baseline gap-2">
-                    <span className="text-2xl font-bold text-white">{completedSprintsCount} de {totalSprintsCount}</span>
-                    <span className="font-mono text-xs text-zenda-cyan">({sprintProgressPercent}%)</span>
+                    <span className="text-2xl font-bold tracking-tight text-[#0F172A]">{completedSprintsCount} de {totalSprintsCount}</span>
+                    <span className="font-mono text-xs font-semibold text-cyan-700">({sprintProgressPercent}%)</span>
                   </div>
-                  <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                     <div
-                      className="h-full bg-gradient-to-r from-zenda-cyan to-blue-400 transition-all duration-500"
+                      className="h-full bg-gradient-to-r from-slate-900 to-cyan-600 transition-all duration-500 rounded-full"
                       style={{ width: `${sprintProgressPercent}%` }}
                     />
                   </div>
                 </div>
 
                 {/* KPI 2: Semáforo de Cuentas */}
-                <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 backdrop-blur-xl">
-                  <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-neutral-400">
+                <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-[#64748B]">
                     <span>Salud de Cuentas</span>
-                    <Activity className="h-4 w-4 text-emerald-400" />
+                    <Activity className="h-4 w-4 text-emerald-600" />
                   </div>
                   <div className="mt-3 flex items-center gap-3">
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                      <span className="font-mono text-sm font-bold text-white">{accountsInRhythm}</span>
+                    <div className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2 py-0.5 border border-emerald-200">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                      <span className="font-mono text-xs font-bold text-emerald-800">{accountsInRhythm}</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
-                      <span className="font-mono text-sm font-bold text-white">{accountsAttention}</span>
+                    <div className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-2 py-0.5 border border-amber-200">
+                      <span className="h-2 w-2 rounded-full bg-amber-500" />
+                      <span className="font-mono text-xs font-bold text-amber-800">{accountsAttention}</span>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]" />
-                      <span className="font-mono text-sm font-bold text-white">{accountsDelayed}</span>
+                    <div className="flex items-center gap-1.5 rounded-lg bg-rose-50 px-2 py-0.5 border border-rose-200">
+                      <span className="h-2 w-2 rounded-full bg-rose-500" />
+                      <span className="font-mono text-xs font-bold text-rose-800">{accountsDelayed}</span>
                     </div>
                   </div>
-                  <p className="mt-3 text-[11px] font-mono text-neutral-400">
-                    {accountsDelayed > 0 ? `⚠️ ${accountsDelayed} cuenta requiere acción inmediata` : 'Operaciones en curso fluido'}
+                  <p className="mt-3 text-[11px] font-mono text-slate-500">
+                    {accountsDelayed > 0 ? `⚠️ ${accountsDelayed} cuenta requiere atención inmediata` : 'Operaciones en curso fluido'}
                   </p>
                 </div>
 
                 {/* KPI 3: Pipeline Activo */}
-                <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 backdrop-blur-xl">
-                  <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-neutral-400">
+                <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-[#64748B]">
                     <span>Reels en Pipeline</span>
-                    <Film className="h-4 w-4 text-purple-400" />
+                    <Film className="h-4 w-4 text-purple-600" />
                   </div>
                   <div className="mt-3 flex items-baseline gap-2">
-                    <span className="text-2xl font-bold text-white">{contentList.filter((c) => c.stage !== 'Publicado').length}</span>
-                    <span className="text-xs text-neutral-400">piezas activas</span>
+                    <span className="text-2xl font-bold tracking-tight text-[#0F172A]">{contentList.filter((c) => c.stage !== 'Publicado').length}</span>
+                    <span className="text-xs text-slate-500">piezas activas</span>
                   </div>
-                  <p className="mt-3 text-[11px] font-mono text-neutral-400">
+                  <p className="mt-3 text-[11px] font-mono text-slate-500">
                     {contentList.filter((c) => c.stage === 'Publicado').length} entregadas este mes
                   </p>
                 </div>
 
                 {/* KPI 4: Flujo Neto */}
-                <div className="rounded-2xl border border-zenda-cyan/30 bg-zenda-cyan/[0.03] p-5 backdrop-blur-xl">
-                  <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-zenda-cyan">
+                <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
+                  <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-[#64748B]">
                     <span>Balance Neto Zenda</span>
-                    <DollarSign className="h-4 w-4 text-zenda-cyan" />
+                    <DollarSign className="h-4 w-4 text-emerald-600" />
                   </div>
-                  <div className="mt-3 text-2xl font-bold text-white">
+                  <div className="mt-3 text-2xl font-bold tracking-tight text-[#0F172A]">
                     S/ {netPEN.toLocaleString()}
                   </div>
-                  <p className="mt-2 text-[11px] font-mono text-zenda-cyan/80">
+                  <p className="mt-2 text-[11px] font-mono text-slate-500">
                     + US$ {netUSD.toLocaleString()} USD · Margen {marginPEN}%
                   </p>
                 </div>
               </div>
 
               {/* SECCIÓN 1: SPRINT DE LA SEMANA */}
-              <div className="rounded-3xl border border-white/10 bg-[#0A0E17]/80 p-6 backdrop-blur-xl shadow-2xl">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-white/5 pb-5">
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 pb-5">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-zenda-cyan shadow-[0_0_8px_rgba(0,229,255,0.8)]" />
-                      <h2 className="text-lg font-bold text-white">Sprint de la Semana</h2>
+                      <span className="h-2 w-2 rounded-full bg-cyan-600" />
+                      <h2 className="text-lg font-bold text-[#0F172A]">Sprint de la Semana</h2>
                     </div>
-                    <p className="mt-1 text-xs text-neutral-400">
-                      Tareas críticas y entregables clave asignados en colección Firestore: <code className="text-zenda-cyan">zenda_sprints</code>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Entregables y foco operativo semanal en colección Firestore: <code className="text-slate-800 font-semibold">zenda_sprints</code>
                     </p>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    {/* Filtros de Sprint */}
-                    <div className="flex rounded-xl border border-white/10 bg-white/[0.02] p-1 text-[11px] font-mono">
+                    {/* Filtros Funcionales de Sprint */}
+                    <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1 text-[11px] font-mono">
                       <button
                         type="button"
                         onClick={() => setSprintFilter('all')}
                         className={`rounded-lg px-2.5 py-1 transition-all ${
-                          sprintFilter === 'all' ? 'bg-white/10 text-white font-semibold' : 'text-neutral-400 hover:text-white'
+                          sprintFilter === 'all' ? 'bg-white text-slate-900 font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
                         }`}
                       >
                         Todos ({sprints.length})
@@ -1404,7 +1441,7 @@ export default function AdminDashboard() {
                         type="button"
                         onClick={() => setSprintFilter('Angel')}
                         className={`rounded-lg px-2.5 py-1 transition-all ${
-                          sprintFilter === 'Angel' ? 'bg-blue-500/20 text-blue-300 font-semibold' : 'text-neutral-400 hover:text-white'
+                          sprintFilter === 'Angel' ? 'bg-zinc-800 text-white font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
                         }`}
                       >
                         Angel
@@ -1413,7 +1450,7 @@ export default function AdminDashboard() {
                         type="button"
                         onClick={() => setSprintFilter('Marco')}
                         className={`rounded-lg px-2.5 py-1 transition-all ${
-                          sprintFilter === 'Marco' ? 'bg-purple-500/20 text-purple-300 font-semibold' : 'text-neutral-400 hover:text-white'
+                          sprintFilter === 'Marco' ? 'bg-[#0B2545] text-cyan-200 font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
                         }`}
                       >
                         Marco
@@ -1422,118 +1459,123 @@ export default function AdminDashboard() {
                         type="button"
                         onClick={() => setSprintFilter('pending')}
                         className={`rounded-lg px-2.5 py-1 transition-all ${
-                          sprintFilter === 'pending' ? 'bg-amber-400/20 text-amber-300 font-semibold' : 'text-neutral-400 hover:text-white'
+                          sprintFilter === 'pending' ? 'bg-white text-amber-800 font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
                         }`}
                       >
                         Pendientes
                       </button>
                     </div>
 
+                    {/* Botón '+ NUEVA TAREA' (Fondo negro #0F172A, texto blanco) */}
                     <button
                       type="button"
                       onClick={() => setSprintModalOpen(true)}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-zenda-cyan to-cyan-300 px-3.5 py-2 font-mono text-xs font-bold uppercase tracking-wider text-neutral-950 shadow-[0_0_15px_rgba(0,229,255,0.25)] transition-all hover:scale-[1.02]"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 py-2 font-mono text-xs font-bold tracking-wider text-white shadow-sm transition-all hover:bg-slate-800"
                     >
                       <Plus className="h-4 w-4" />
-                      Nueva Tarea
+                      + NUEVA TAREA
                     </button>
                   </div>
                 </div>
 
                 {/* Lista interactiva de tareas del sprint */}
-                <div className="mt-5 divide-y divide-white/5">
+                <div className="mt-4 divide-y divide-slate-100">
                   {filteredSprints.length === 0 ? (
-                    <div className="py-10 text-center font-mono text-xs text-neutral-500">
+                    <div className="py-10 text-center font-mono text-xs text-slate-400">
                       No hay tareas en esta vista del sprint.
                     </div>
                   ) : (
-                    filteredSprints.map((sprint) => (
-                      <div
-                        key={sprint.id}
-                        className={`group flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between transition-colors ${
-                          sprint.completed ? 'opacity-60' : 'hover:bg-white/[0.01]'
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleSprint(sprint.id, sprint.completed)}
-                            className="mt-0.5 rounded-lg p-1 text-neutral-400 hover:text-zenda-cyan transition-colors"
-                            title={sprint.completed ? 'Marcar como pendiente' : 'Marcar como completada'}
-                          >
-                            {sprint.completed ? (
-                              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-                            ) : (
-                              <Circle className="h-5 w-5 text-neutral-500 group-hover:text-zenda-cyan" />
-                            )}
-                          </button>
+                    filteredSprints.map((sprint) => {
+                      const deadlineInfo = getDeadlineStatus(sprint.deadline, todayDateStr);
 
-                          <div>
-                            <p className={`text-sm text-white ${sprint.completed ? 'line-through text-neutral-400' : 'font-medium'}`}>
-                              {sprint.title}
-                            </p>
-                            <div className="mt-1 flex flex-wrap items-center gap-2">
-                              {/* Asignado */}
-                              <span
-                                className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${
-                                  sprint.assignee === 'Angel'
-                                    ? 'bg-blue-500/10 text-blue-300 border border-blue-500/20'
-                                    : 'bg-purple-500/10 text-purple-300 border border-purple-500/20'
-                                }`}
-                              >
-                                @{sprint.assignee}
-                              </span>
+                      return (
+                        <div
+                          key={sprint.id}
+                          className={`group flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between transition-colors ${
+                            sprint.completed ? 'opacity-50' : 'hover:bg-slate-50/70'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSprint(sprint.id, sprint.completed)}
+                              className="mt-0.5 rounded-full text-slate-400 hover:text-slate-900 transition-colors"
+                              title={sprint.completed ? 'Marcar como pendiente' : 'Marcar como completada'}
+                            >
+                              {sprint.completed ? (
+                                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                              ) : (
+                                <Circle className="h-5 w-5 text-slate-300 group-hover:text-slate-700" />
+                              )}
+                            </button>
 
-                              {/* Prioridad */}
-                              <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] border ${getPriorityBadge(sprint.priority)}`}>
-                                {sprint.priority}
-                              </span>
+                            <div>
+                              <p className={`text-sm ${sprint.completed ? 'line-through text-slate-400 font-normal' : 'font-medium text-slate-900'}`}>
+                                {sprint.title}
+                              </p>
+                              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                {/* Badges de asignado requeridos */}
+                                {sprint.assignee === 'Angel' ? (
+                                  <span className="rounded-full bg-zinc-800 px-2 py-0.5 font-mono text-[10px] font-semibold text-white">
+                                    @Angel
+                                  </span>
+                                ) : (
+                                  <span className="rounded-full bg-[#0B2545] border border-cyan-800/60 px-2 py-0.5 font-mono text-[10px] font-semibold text-cyan-200">
+                                    @Marco
+                                  </span>
+                                )}
 
-                              {/* Deadline */}
-                              <span className="flex items-center gap-1 font-mono text-[10px] text-neutral-400">
-                                <Clock className="h-3 w-3" />
-                                {sprint.deadline}
-                              </span>
+                                {/* Prioridad */}
+                                <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] border ${getPriorityBadge(sprint.priority)}`}>
+                                  {sprint.priority}
+                                </span>
+
+                                {/* Fecha de entrega con cálculo dinámico */}
+                                <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] border ${deadlineInfo.colorClass}`}>
+                                  <Clock className="h-3 w-3" />
+                                  <span>{sprint.deadline} · {deadlineInfo.label}</span>
+                                </span>
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="flex items-center justify-end gap-2 pl-8 sm:pl-0">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteSprint(sprint.id)}
-                            className="rounded-lg p-1.5 text-neutral-600 opacity-0 transition-all hover:bg-white/5 hover:text-rose-400 group-hover:opacity-100"
-                            title="Eliminar tarea"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          <div className="flex items-center justify-end gap-2 pl-8 sm:pl-0">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSprint(sprint.id)}
+                              className="rounded-lg p-1.5 text-slate-400 opacity-0 transition-all hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100"
+                              title="Eliminar tarea"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
 
               {/* SECCIÓN 2: SEMÁFORO DE CUENTAS ACTIVAS */}
-              <div className="rounded-3xl border border-white/10 bg-[#0A0E17]/80 p-6 backdrop-blur-xl shadow-2xl">
-                <div className="flex flex-col gap-2 border-b border-white/5 pb-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-2 border-b border-slate-100 pb-5 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                      <h2 className="text-lg font-bold text-white">Semáforo de Cuentas Activas</h2>
+                      <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                      <h2 className="text-lg font-bold text-[#0F172A]">Semáforo de Cuentas Activas</h2>
                     </div>
-                    <p className="mt-1 text-xs text-neutral-400">
-                      Detección instantánea de cuellos de botella y estado de salud de cada cliente.
+                    <p className="mt-1 text-xs text-slate-500">
+                      Detección instantánea de cuellos de botella y salud de entrega por cliente.
                     </p>
                   </div>
 
                   {/* Leyenda del semáforo */}
-                  <div className="flex items-center gap-3 font-mono text-[10px] text-neutral-400">
+                  <div className="flex items-center gap-3 font-mono text-[10px] text-slate-600">
                     <span className="flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400" /> En ritmo
+                      <span className="h-2 w-2 rounded-full bg-emerald-500" /> En ritmo
                     </span>
                     <span className="flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-amber-400" /> Requiere atención
+                      <span className="h-2 w-2 rounded-full bg-amber-500" /> Requiere atención
                     </span>
                     <span className="flex items-center gap-1">
                       <span className="h-2 w-2 rounded-full bg-rose-500" /> Demorado
@@ -1555,16 +1597,16 @@ export default function AdminDashboard() {
                     return (
                       <div
                         key={client.id}
-                        className="flex flex-col justify-between rounded-2xl border border-white/10 bg-white/[0.02] p-5 backdrop-blur-md transition-all hover:border-white/20 hover:bg-white/[0.03]"
+                        className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:border-slate-300 hover:shadow-md"
                       >
                         <div>
                           {/* Header de la tarjeta */}
                           <div className="flex items-start justify-between gap-2">
                             <div>
-                              <h3 className="text-base font-bold text-white leading-tight">
+                              <h3 className="text-base font-bold text-slate-900 leading-tight">
                                 {client.businessName}
                               </h3>
-                              <p className="mt-0.5 text-xs text-neutral-400 line-clamp-1">{client.decisionMaker}</p>
+                              <p className="mt-0.5 text-xs text-slate-500 line-clamp-1">{client.decisionMaker}</p>
                             </div>
 
                             {/* Selector de Semáforo en Tiempo Real */}
@@ -1575,44 +1617,44 @@ export default function AdminDashboard() {
                                 health,
                               )}`}
                             >
-                              <option value="En ritmo" className="bg-neutral-900 text-white">🟢 En ritmo</option>
-                              <option value="Requiere atención" className="bg-neutral-900 text-white">🟡 Requiere atención</option>
-                              <option value="Demorado" className="bg-neutral-900 text-white">🔴 Demorado</option>
+                              <option value="En ritmo">🟢 En ritmo</option>
+                              <option value="Requiere atención">🟡 Requiere atención</option>
+                              <option value="Demorado">🔴 Demorado</option>
                             </select>
                           </div>
 
                           {/* Cuello de botella detectado */}
-                          <div className="mt-4 rounded-xl border border-white/5 bg-white/[0.01] p-3 text-xs">
-                            <span className="font-mono text-[10px] uppercase tracking-wider text-rose-400 flex items-center gap-1">
+                          <div className="mt-4 rounded-xl border border-rose-100 bg-rose-50/50 p-3 text-xs">
+                            <span className="font-mono text-[10px] uppercase tracking-wider text-rose-700 font-semibold flex items-center gap-1">
                               <AlertTriangle className="h-3 w-3" /> Foco / Cuello de Botella:
                             </span>
-                            <p className="mt-1 text-neutral-300 leading-snug line-clamp-2">
+                            <p className="mt-1 text-slate-700 leading-snug line-clamp-2 font-normal">
                               {client.bottleneckProcess || 'En diagnóstico preliminar.'}
                             </p>
                           </div>
 
                           {/* Próximo hito */}
-                          <div className="mt-3 rounded-xl border border-zenda-cyan/20 bg-zenda-cyan/[0.03] p-3 text-xs">
-                            <span className="font-mono text-[10px] uppercase tracking-wider text-zenda-cyan flex items-center gap-1">
+                          <div className="mt-3 rounded-xl border border-sky-100 bg-sky-50/50 p-3 text-xs">
+                            <span className="font-mono text-[10px] uppercase tracking-wider text-sky-800 font-semibold flex items-center gap-1">
                               <Target className="h-3 w-3" /> Próximo Hito:
                             </span>
-                            <p className="mt-1 font-medium text-white line-clamp-2">
+                            <p className="mt-1 font-medium text-slate-800 line-clamp-2">
                               {client.nextMilestone || client.primaryGoal || 'Configuración operativa'}
                             </p>
                           </div>
                         </div>
 
                         {/* Footer de la tarjeta con responsable y WhatsApp */}
-                        <div className="mt-5 border-t border-white/5 pt-3 flex items-center justify-between">
-                          <span className="font-mono text-[11px] text-neutral-400">
-                            Lead: <span className="text-white font-semibold">{client.leadOwner || 'Angel'}</span>
+                        <div className="mt-5 border-t border-slate-100 pt-3 flex items-center justify-between">
+                          <span className="font-mono text-[11px] text-slate-500">
+                            Lead: <span className="text-slate-900 font-bold">{client.leadOwner || 'Angel'}</span>
                           </span>
 
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
                               onClick={() => setSelectedClientDetail(client)}
-                              className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-[11px] text-neutral-300 hover:border-white/20 hover:text-white"
+                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-mono text-[11px] font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-sm"
                             >
                               Ficha
                             </button>
@@ -1620,7 +1662,7 @@ export default function AdminDashboard() {
                               href={waUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/20"
+                              className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
                             >
                               <MessageCircle className="h-3 w-3" />
                               WhatsApp
@@ -1644,11 +1686,11 @@ export default function AdminDashboard() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <Film className="h-5 w-5 text-purple-400" />
-                    <h2 className="text-lg font-bold text-white">Pipeline de Producción Audiovisual</h2>
+                    <Film className="h-5 w-5 text-purple-600" />
+                    <h2 className="text-lg font-bold text-[#0F172A]">Pipeline de Producción Audiovisual</h2>
                   </div>
-                  <p className="mt-1 text-xs text-neutral-400">
-                    Seguimiento etapa por etapa de reels, hooks y entregables por cliente en <code className="text-purple-400">zenda_content</code>.
+                  <p className="mt-1 text-xs text-slate-500">
+                    Seguimiento etapa por etapa de reels, hooks y entregables por cliente en <code className="text-slate-800 font-semibold">zenda_content</code>.
                   </p>
                 </div>
 
@@ -1656,17 +1698,17 @@ export default function AdminDashboard() {
                   <button
                     type="button"
                     onClick={() => setContentModalOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-zenda-cyan to-cyan-300 px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider text-neutral-950 shadow-[0_0_15px_rgba(0,229,255,0.25)] transition-all hover:scale-[1.02]"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 py-2 font-mono text-xs font-bold tracking-wider text-white shadow-sm transition-all hover:bg-slate-800"
                   >
                     <Plus className="h-4 w-4" />
-                    Nuevo Reel / Video
+                    + NUEVO REEL / VIDEO
                   </button>
                 </div>
               </div>
 
               {/* Filtros por etapa */}
               <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                <span className="font-mono text-xs text-neutral-400 flex items-center gap-1">
+                <span className="font-mono text-xs text-slate-500 flex items-center gap-1">
                   <Filter className="h-3.5 w-3.5" /> Etapa:
                 </span>
                 <button
@@ -1674,8 +1716,8 @@ export default function AdminDashboard() {
                   onClick={() => setContentStageFilter('all')}
                   className={`rounded-xl px-3 py-1.5 font-mono text-xs transition-all ${
                     contentStageFilter === 'all'
-                      ? 'border border-white/20 bg-white/10 text-white font-semibold'
-                      : 'text-neutral-400 hover:text-white'
+                      ? 'bg-slate-900 text-white font-semibold shadow-sm'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   Todas ({contentList.length})
@@ -1689,8 +1731,8 @@ export default function AdminDashboard() {
                       onClick={() => setContentStageFilter(stage)}
                       className={`rounded-xl px-3 py-1.5 font-mono text-xs transition-all ${
                         contentStageFilter === stage
-                          ? 'border border-zenda-cyan/40 bg-zenda-cyan/15 text-zenda-cyan font-semibold'
-                          : 'text-neutral-400 hover:text-white'
+                          ? 'bg-slate-900 text-white font-semibold shadow-sm'
+                          : 'border border-slate-200 bg-white text-slate-600 hover:text-slate-900'
                       }`}
                     >
                       {stage} ({count})
@@ -1699,11 +1741,11 @@ export default function AdminDashboard() {
                 })}
               </div>
 
-              {/* Tabla / Lista de Contenido */}
-              <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#0A0E17]/80 backdrop-blur-xl shadow-2xl">
+              {/* Tabla de Contenido en Contenedor Blanco */}
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="border-b border-white/5 bg-white/[0.02] font-mono text-[11px] uppercase tracking-wider text-neutral-400">
+                    <thead className="border-b border-slate-200 bg-slate-50 font-mono text-[11px] uppercase tracking-wider text-slate-500">
                       <tr>
                         <th className="px-5 py-4">Cliente / Cuenta</th>
                         <th className="px-5 py-4">Hook o Título del Video</th>
@@ -1713,31 +1755,31 @@ export default function AdminDashboard() {
                         <th className="px-5 py-4 text-right">Material / Acciones</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-white/5">
+                    <tbody className="divide-y divide-slate-100">
                       {filteredContent.length === 0 ? (
                         <tr>
-                          <td colSpan="6" className="p-8 text-center font-mono text-neutral-400">
+                          <td colSpan="6" className="p-8 text-center font-mono text-slate-400">
                             No hay piezas de contenido en la etapa seleccionada.
                           </td>
                         </tr>
                       ) : (
                         filteredContent.map((item) => (
-                          <tr key={item.id} className="transition-colors hover:bg-white/[0.02]">
+                          <tr key={item.id} className="transition-colors hover:bg-slate-50/70">
                             {/* Cliente */}
-                            <td className="px-5 py-4 font-semibold text-white whitespace-nowrap">
-                              <span className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 font-mono text-xs text-neutral-300">
+                            <td className="px-5 py-4 font-semibold text-slate-900 whitespace-nowrap">
+                              <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-800">
                                 {item.client}
                               </span>
                             </td>
 
                             {/* Hook / Título */}
                             <td className="px-5 py-4">
-                              <p className="max-w-md font-medium text-white leading-snug">
+                              <p className="max-w-md font-medium text-slate-900 leading-snug">
                                 {item.title}
                               </p>
                             </td>
 
-                            {/* Etapa actual con selector directo */}
+                            {/* Etapa actual */}
                             <td className="px-5 py-4 whitespace-nowrap">
                               <select
                                 value={item.stage}
@@ -1747,34 +1789,34 @@ export default function AdminDashboard() {
                                 )}`}
                               >
                                 {contentStages.map((st) => (
-                                  <option key={st} value={st} className="bg-neutral-900 text-white">
+                                  <option key={st} value={st}>
                                     {st}
                                   </option>
                                 ))}
                               </select>
                             </td>
 
-                            {/* Responsable (Angel / Marco) */}
+                            {/* Responsable */}
                             <td className="px-5 py-4 whitespace-nowrap">
                               <select
                                 value={item.assignee || 'Angel'}
                                 onChange={(e) => handleUpdateContentAssignee(item.id, e.target.value)}
-                                className="rounded-lg border border-white/10 bg-white/[0.02] px-2 py-1 font-mono text-[11px] text-neutral-300 outline-none cursor-pointer"
+                                className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-[11px] text-slate-700 outline-none cursor-pointer"
                               >
-                                <option value="Angel" className="bg-neutral-900 text-white">Angel</option>
-                                <option value="Marco" className="bg-neutral-900 text-white">Marco</option>
+                                <option value="Angel">Angel</option>
+                                <option value="Marco">Marco</option>
                               </select>
                             </td>
 
-                            {/* Fecha de publicación */}
-                            <td className="px-5 py-4 font-mono text-neutral-400 whitespace-nowrap">
+                            {/* Fecha */}
+                            <td className="px-5 py-4 font-mono text-slate-600 whitespace-nowrap">
                               <span className="flex items-center gap-1.5">
-                                <CalendarIcon className="h-3.5 w-3.5 text-neutral-500" />
+                                <CalendarIcon className="h-3.5 w-3.5 text-slate-400" />
                                 {item.publishDate}
                               </span>
                             </td>
 
-                            {/* Drive & Acciones */}
+                            {/* Material & Acciones */}
                             <td className="px-5 py-4 text-right whitespace-nowrap">
                               <div className="flex items-center justify-end gap-2">
                                 {item.driveUrl ? (
@@ -1782,20 +1824,20 @@ export default function AdminDashboard() {
                                     href={item.driveUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-zenda-cyan/30 bg-zenda-cyan/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-zenda-cyan hover:bg-zenda-cyan/20"
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50 px-2.5 py-1 font-mono text-[11px] font-semibold text-cyan-800 hover:bg-cyan-100"
                                     title="Abrir carpeta de Drive"
                                   >
                                     <FolderGit2 className="h-3.5 w-3.5" />
                                     Drive
                                   </a>
                                 ) : (
-                                  <span className="font-mono text-[10px] text-neutral-600">Sin link</span>
+                                  <span className="font-mono text-[10px] text-slate-400">Sin link</span>
                                 )}
 
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteContent(item.id)}
-                                  className="rounded p-1 text-neutral-600 hover:text-rose-400 transition-colors"
+                                  className="rounded p-1 text-slate-400 hover:text-rose-600 transition-colors"
                                   title="Eliminar pieza"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
@@ -1821,11 +1863,11 @@ export default function AdminDashboard() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <CalendarIcon className="h-5 w-5 text-zenda-cyan" />
-                    <h2 className="text-lg font-bold text-white">Calendario & Rodajes Operativos</h2>
+                    <CalendarIcon className="h-5 w-5 text-cyan-600" />
+                    <h2 className="text-lg font-bold text-[#0F172A]">Calendario & Rodajes Operativos</h2>
                   </div>
-                  <p className="mt-1 text-xs text-neutral-400">
-                    Rodajes presenciales, fechas límite de publicación y cobros en colección <code className="text-zenda-cyan">zenda_calendar</code>.
+                  <p className="mt-1 text-xs text-slate-500">
+                    Rodajes presenciales, fechas límite de publicación y cobros en colección <code className="text-slate-800 font-semibold">zenda_calendar</code>.
                   </p>
                 </div>
 
@@ -1833,24 +1875,26 @@ export default function AdminDashboard() {
                   <button
                     type="button"
                     onClick={() => setCalendarModalOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-zenda-cyan to-cyan-300 px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider text-neutral-950 shadow-[0_0_15px_rgba(0,229,255,0.25)] transition-all hover:scale-[1.02]"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 py-2 font-mono text-xs font-bold tracking-wider text-white shadow-sm transition-all hover:bg-slate-800"
                   >
                     <Plus className="h-4 w-4" />
-                    Nuevo Evento
+                    + NUEVO EVENTO
                   </button>
                 </div>
               </div>
 
               {/* Filtro por tipo de evento */}
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-mono text-xs text-neutral-400 flex items-center gap-1">
+                <span className="font-mono text-xs text-slate-500 flex items-center gap-1">
                   <Filter className="h-3.5 w-3.5" /> Tipo:
                 </span>
                 <button
                   type="button"
                   onClick={() => setCalendarTypeFilter('all')}
                   className={`rounded-xl px-3 py-1 font-mono text-xs transition-all ${
-                    calendarTypeFilter === 'all' ? 'border border-white/20 bg-white/10 text-white font-semibold' : 'text-neutral-400 hover:text-white'
+                    calendarTypeFilter === 'all'
+                      ? 'bg-slate-900 text-white font-semibold shadow-sm'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   Todos ({calendarEvents.length})
@@ -1860,8 +1904,8 @@ export default function AdminDashboard() {
                   onClick={() => setCalendarTypeFilter('Rodaje presencial')}
                   className={`rounded-xl px-3 py-1 font-mono text-xs transition-all ${
                     calendarTypeFilter === 'Rodaje presencial'
-                      ? 'border border-purple-400/40 bg-purple-500/20 text-purple-300 font-semibold'
-                      : 'text-neutral-400 hover:text-white'
+                      ? 'border border-purple-300 bg-purple-100 text-purple-900 font-semibold'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   🎥 Rodajes ({calendarEvents.filter((e) => e.type === 'Rodaje presencial').length})
@@ -1871,8 +1915,8 @@ export default function AdminDashboard() {
                   onClick={() => setCalendarTypeFilter('Publicación / Entrega')}
                   className={`rounded-xl px-3 py-1 font-mono text-xs transition-all ${
                     calendarTypeFilter === 'Publicación / Entrega'
-                      ? 'border border-zenda-cyan/40 bg-zenda-cyan/20 text-zenda-cyan font-semibold'
-                      : 'text-neutral-400 hover:text-white'
+                      ? 'border border-sky-300 bg-sky-100 text-sky-900 font-semibold'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   🚀 Publicaciones ({calendarEvents.filter((e) => e.type === 'Publicación / Entrega').length})
@@ -1882,8 +1926,8 @@ export default function AdminDashboard() {
                   onClick={() => setCalendarTypeFilter('Cobro / Facturación')}
                   className={`rounded-xl px-3 py-1 font-mono text-xs transition-all ${
                     calendarTypeFilter === 'Cobro / Facturación'
-                      ? 'border border-emerald-400/40 bg-emerald-500/20 text-emerald-300 font-semibold'
-                      : 'text-neutral-400 hover:text-white'
+                      ? 'border border-emerald-300 bg-emerald-100 text-emerald-900 font-semibold'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   💰 Cobros ({calendarEvents.filter((e) => e.type === 'Cobro / Facturación').length})
@@ -1893,8 +1937,8 @@ export default function AdminDashboard() {
                   onClick={() => setCalendarTypeFilter('Reunión / Sync')}
                   className={`rounded-xl px-3 py-1 font-mono text-xs transition-all ${
                     calendarTypeFilter === 'Reunión / Sync'
-                      ? 'border border-amber-400/40 bg-amber-500/20 text-amber-300 font-semibold'
-                      : 'text-neutral-400 hover:text-white'
+                      ? 'border border-amber-300 bg-amber-100 text-amber-900 font-semibold'
+                      : 'border border-slate-200 bg-white text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   🤝 Reuniones ({calendarEvents.filter((e) => e.type === 'Reunión / Sync').length})
@@ -1903,10 +1947,10 @@ export default function AdminDashboard() {
 
               {/* Grid: Mini-Calendario a la izquierda y Agenda detallada a la derecha */}
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-                {/* Cuadrícula interactiva mensual (5 columnas) */}
-                <div className="rounded-3xl border border-white/10 bg-[#0A0E17]/80 p-6 backdrop-blur-xl shadow-2xl lg:col-span-5">
-                  <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                    <h3 className="font-mono text-sm font-bold text-white">
+                {/* Cuadrícula interactiva mensual */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-5">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                    <h3 className="font-mono text-sm font-bold text-slate-900">
                       {monthNames[currentCalendarDate.getMonth()]} {currentCalendarDate.getFullYear()}
                     </h3>
                     <div className="flex items-center gap-1">
@@ -1917,7 +1961,7 @@ export default function AdminDashboard() {
                             new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth() - 1, 1),
                           )
                         }
-                        className="rounded-lg p-1.5 text-neutral-400 hover:bg-white/10 hover:text-white"
+                        className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                         title="Mes anterior"
                       >
                         <ChevronLeft className="h-4 w-4" />
@@ -1928,7 +1972,7 @@ export default function AdminDashboard() {
                           setCurrentCalendarDate(new Date());
                           setSelectedCalendarDay(null);
                         }}
-                        className="rounded-lg px-2 py-1 font-mono text-[10px] text-neutral-400 hover:bg-white/10 hover:text-white"
+                        className="rounded-lg px-2 py-1 font-mono text-[10px] text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                       >
                         Hoy
                       </button>
@@ -1939,7 +1983,7 @@ export default function AdminDashboard() {
                             new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth() + 1, 1),
                           )
                         }
-                        className="rounded-lg p-1.5 text-neutral-400 hover:bg-white/10 hover:text-white"
+                        className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                         title="Mes siguiente"
                       >
                         <ChevronRight className="h-4 w-4" />
@@ -1947,8 +1991,8 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  {/* Nombres de los días de la semana */}
-                  <div className="mt-4 grid grid-cols-7 gap-1 text-center font-mono text-[10px] uppercase text-neutral-500">
+                  {/* Días de la semana */}
+                  <div className="mt-4 grid grid-cols-7 gap-1 text-center font-mono text-[10px] uppercase text-slate-400">
                     <div>Lun</div>
                     <div>Mar</div>
                     <div>Mié</div>
@@ -1967,7 +2011,7 @@ export default function AdminDashboard() {
 
                       const hasEvents = cell.events && cell.events.length > 0;
                       const isSelected = selectedCalendarDay === cell.dateStr;
-                      const isToday = cell.dateStr === getTodayDate();
+                      const isToday = cell.dateStr === todayDateStr;
 
                       return (
                         <button
@@ -1978,10 +2022,10 @@ export default function AdminDashboard() {
                           }
                           className={`relative flex h-10 flex-col items-center justify-center rounded-xl font-mono text-xs transition-all ${
                             isSelected
-                              ? 'border border-zenda-cyan bg-zenda-cyan/20 text-white font-bold shadow-[0_0_12px_rgba(0,229,255,0.3)]'
+                              ? 'bg-slate-900 text-white font-bold shadow-md'
                               : isToday
-                              ? 'border border-white/30 bg-white/10 text-white font-bold'
-                              : 'text-neutral-300 hover:bg-white/5'
+                              ? 'border-2 border-slate-900 text-slate-900 font-bold bg-slate-50'
+                              : 'text-slate-700 hover:bg-slate-100'
                           }`}
                         >
                           <span>{cell.day}</span>
@@ -1992,10 +2036,10 @@ export default function AdminDashboard() {
                                   key={ev.id}
                                   className={`h-1 w-1 rounded-full ${
                                     ev.type === 'Rodaje presencial'
-                                      ? 'bg-purple-400'
+                                      ? 'bg-purple-500'
                                       : ev.type === 'Cobro / Facturación'
-                                      ? 'bg-emerald-400'
-                                      : 'bg-zenda-cyan'
+                                      ? 'bg-emerald-500'
+                                      : 'bg-sky-500'
                                   }`}
                                 />
                               ))}
@@ -2007,12 +2051,12 @@ export default function AdminDashboard() {
                   </div>
 
                   {selectedCalendarDay && (
-                    <div className="mt-4 border-t border-white/5 pt-3 flex items-center justify-between text-xs font-mono">
-                      <span className="text-zenda-cyan">Filtrando por día: {selectedCalendarDay}</span>
+                    <div className="mt-4 border-t border-slate-100 pt-3 flex items-center justify-between text-xs font-mono">
+                      <span className="text-cyan-700 font-semibold">Filtrando por día: {selectedCalendarDay}</span>
                       <button
                         type="button"
                         onClick={() => setSelectedCalendarDay(null)}
-                        className="text-neutral-400 hover:text-white underline"
+                        className="text-slate-500 hover:text-slate-900 underline"
                       >
                         Ver todos
                       </button>
@@ -2020,27 +2064,27 @@ export default function AdminDashboard() {
                   )}
                 </div>
 
-                {/* Lista de Agenda de Eventos (7 columnas) */}
-                <div className="rounded-3xl border border-white/10 bg-[#0A0E17]/80 p-6 backdrop-blur-xl shadow-2xl lg:col-span-7">
-                  <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                    <h3 className="font-mono text-sm font-bold text-white">
+                {/* Lista de Agenda de Eventos */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-7">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                    <h3 className="font-mono text-sm font-bold text-slate-900">
                       Próximos Eventos & Fechas Límite
                     </h3>
-                    <span className="font-mono text-xs text-neutral-400">
+                    <span className="font-mono text-xs text-slate-500">
                       {filteredCalendarEvents.length} eventos en vista
                     </span>
                   </div>
 
-                  <div className="mt-4 space-y-3.5">
+                  <div className="mt-4 space-y-3">
                     {filteredCalendarEvents.length === 0 ? (
-                      <div className="py-12 text-center font-mono text-xs text-neutral-500">
+                      <div className="py-12 text-center font-mono text-xs text-slate-400">
                         No hay eventos programados para los filtros seleccionados.
                       </div>
                     ) : (
                       filteredCalendarEvents.map((ev) => (
                         <div
                           key={ev.id}
-                          className={`flex flex-col gap-3 rounded-2xl border border-white/5 bg-white/[0.02] p-4 transition-all hover:border-white/15 ${
+                          className={`flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:border-slate-300 ${
                             ev.completed ? 'opacity-50' : ''
                           }`}
                         >
@@ -2049,13 +2093,13 @@ export default function AdminDashboard() {
                               <button
                                 type="button"
                                 onClick={() => handleToggleCalendarCompleted(ev.id, ev.completed)}
-                                className="mt-1 text-neutral-500 hover:text-emerald-400 transition-colors"
+                                className="mt-1 text-slate-400 hover:text-emerald-600 transition-colors"
                                 title={ev.completed ? 'Marcar como pendiente' : 'Marcar como completado'}
                               >
                                 {ev.completed ? (
-                                  <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                                  <CheckCircle2 className="h-5 w-5 text-emerald-600" />
                                 ) : (
-                                  <Circle className="h-5 w-5" />
+                                  <Circle className="h-5 w-5 text-slate-300" />
                                 )}
                               </button>
 
@@ -2066,12 +2110,12 @@ export default function AdminDashboard() {
                                   {ev.type}
                                 </span>
 
-                                <h4 className={`mt-1.5 text-sm font-bold text-white ${ev.completed ? 'line-through text-neutral-400' : ''}`}>
+                                <h4 className={`mt-1.5 text-sm font-bold text-slate-900 ${ev.completed ? 'line-through text-slate-400' : ''}`}>
                                   {ev.title}
                                 </h4>
 
-                                <p className="font-mono text-xs text-neutral-400">
-                                  Cuenta: <span className="text-neutral-200 font-semibold">{ev.client}</span>
+                                <p className="font-mono text-xs text-slate-600">
+                                  Cuenta: <span className="text-slate-900 font-semibold">{ev.client}</span>
                                 </p>
                               </div>
                             </div>
@@ -2079,26 +2123,26 @@ export default function AdminDashboard() {
                             <button
                               type="button"
                               onClick={() => handleDeleteCalendarEvent(ev.id)}
-                              className="rounded p-1 text-neutral-600 hover:text-rose-400"
+                              className="rounded p-1 text-slate-400 hover:text-rose-600"
                               title="Eliminar evento"
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
 
                           {ev.notes && (
-                            <p className="rounded-xl border border-white/5 bg-white/[0.01] p-2.5 text-xs text-neutral-300 leading-relaxed">
+                            <p className="rounded-xl border border-slate-100 bg-slate-50 p-2.5 text-xs text-slate-700 leading-relaxed font-normal">
                               {ev.notes}
                             </p>
                           )}
 
-                          <div className="flex items-center justify-between border-t border-white/5 pt-2.5 text-[11px] font-mono text-neutral-400">
-                            <span className="flex items-center gap-1.5 text-white">
-                              <Clock className="h-3.5 w-3.5 text-zenda-cyan" />
+                          <div className="flex items-center justify-between border-t border-slate-100 pt-2.5 text-[11px] font-mono text-slate-600">
+                            <span className="flex items-center gap-1.5 text-slate-900 font-semibold">
+                              <Clock className="h-3.5 w-3.5 text-cyan-600" />
                               {ev.date} · {ev.time} hrs
                             </span>
 
-                            <span className="rounded bg-white/5 px-2 py-0.5 text-neutral-300">
+                            <span className="rounded bg-slate-100 px-2 py-0.5 text-slate-700 font-medium">
                               @{ev.assignee}
                             </span>
                           </div>
@@ -2116,23 +2160,23 @@ export default function AdminDashboard() {
           {/* ================================================================== */}
           {activeTab === 'finances' && (
             <div className="space-y-8">
-              {/* Selector de Subsección: Clientes/Onboardings vs Caja Neta */}
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-white/10 pb-4">
+              {/* Selector de Subsección: Clientes vs Caja Neta */}
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-200 pb-4">
                 <div>
-                  <h2 className="text-lg font-bold text-white">Finanzas & Clientes Onboarding</h2>
-                  <p className="mt-0.5 text-xs text-neutral-400">
+                  <h2 className="text-lg font-bold text-[#0F172A]">Finanzas & Clientes Onboarding</h2>
+                  <p className="mt-0.5 text-xs text-slate-500">
                     Control de caja, rentabilidad y fichas oficiales de clientes en Zenda.
                   </p>
                 </div>
 
-                <div className="flex rounded-2xl border border-white/10 bg-white/[0.02] p-1 text-xs font-mono">
+                <div className="flex rounded-xl border border-slate-200 bg-slate-100 p-1 text-xs font-mono">
                   <button
                     type="button"
                     onClick={() => setFinanceSubTab('clients')}
-                    className={`rounded-xl px-4 py-2 transition-all ${
+                    className={`rounded-lg px-4 py-2 transition-all ${
                       financeSubTab === 'clients'
-                        ? 'border border-zenda-cyan/30 bg-zenda-cyan/15 text-white font-semibold shadow-[0_0_12px_rgba(0,229,255,0.2)]'
-                        : 'text-neutral-400 hover:text-white'
+                        ? 'bg-white text-slate-900 font-bold shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     Clientes & Onboardings ({clients.length})
@@ -2140,10 +2184,10 @@ export default function AdminDashboard() {
                   <button
                     type="button"
                     onClick={() => setFinanceSubTab('ledger')}
-                    className={`rounded-xl px-4 py-2 transition-all ${
+                    className={`rounded-lg px-4 py-2 transition-all ${
                       financeSubTab === 'ledger'
-                        ? 'border border-emerald-500/30 bg-emerald-500/15 text-white font-semibold shadow-[0_0_12px_rgba(16,185,129,0.2)]'
-                        : 'text-neutral-400 hover:text-white'
+                        ? 'bg-white text-emerald-800 font-bold shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     Caja Neta & Movimientos
@@ -2157,26 +2201,26 @@ export default function AdminDashboard() {
                   {/* Barra de filtros y búsqueda */}
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="relative flex-1 max-w-md">
-                      <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-neutral-500" />
+                      <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
                       <input
                         type="text"
                         placeholder="Buscar por negocio, decisor o WhatsApp..."
                         value={clientSearch}
                         onChange={(e) => setClientSearch(e.target.value)}
-                        className="w-full rounded-xl border border-white/10 bg-white/[0.03] pl-10 pr-4 py-2.5 text-xs text-white placeholder:text-neutral-500 outline-none hover:border-white/20 focus:border-zenda-cyan"
+                        className="w-full rounded-xl border border-slate-200 bg-white pl-10 pr-4 py-2.5 text-xs text-slate-900 placeholder:text-slate-400 outline-none hover:border-slate-300 focus:border-slate-900 shadow-sm"
                       />
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono text-neutral-400 flex items-center gap-1">
+                      <span className="text-xs font-mono text-slate-500 flex items-center gap-1">
                         <Filter className="h-3.5 w-3.5" /> Filtrar:
                       </span>
-                      <div className="flex rounded-xl border border-white/10 bg-white/[0.02] p-1 text-xs font-mono">
+                      <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1 text-xs font-mono">
                         <button
                           type="button"
                           onClick={() => setClientFilter('all')}
                           className={`rounded-lg px-3 py-1 transition-all ${
-                            clientFilter === 'all' ? 'bg-white/10 text-white font-semibold' : 'text-neutral-400 hover:text-white'
+                            clientFilter === 'all' ? 'bg-white text-slate-900 font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
                           Todos ({clients.length})
@@ -2185,7 +2229,7 @@ export default function AdminDashboard() {
                           type="button"
                           onClick={() => setClientFilter('onboarding')}
                           className={`rounded-lg px-3 py-1 transition-all ${
-                            clientFilter === 'onboarding' ? 'bg-zenda-cyan/20 text-zenda-cyan font-semibold' : 'text-neutral-400 hover:text-white'
+                            clientFilter === 'onboarding' ? 'bg-white text-cyan-700 font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
                           Onboardings ({clients.filter((c) => c.type === 'onboarding').length})
@@ -2194,7 +2238,7 @@ export default function AdminDashboard() {
                           type="button"
                           onClick={() => setClientFilter('leads')}
                           className={`rounded-lg px-3 py-1 transition-all ${
-                            clientFilter === 'leads' ? 'bg-blue-500/20 text-blue-300 font-semibold' : 'text-neutral-400 hover:text-white'
+                            clientFilter === 'leads' ? 'bg-white text-blue-700 font-bold shadow-sm' : 'text-slate-600 hover:text-slate-900'
                           }`}
                         >
                           Leads 60s ({clients.filter((c) => c.type === 'leads').length})
@@ -2203,11 +2247,11 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  {/* Tabla de Clientes */}
-                  <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#0A0E17]/80 backdrop-blur-xl shadow-2xl">
+                  {/* Tabla de Clientes en Blanco */}
+                  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs">
-                        <thead className="border-b border-white/5 bg-white/[0.02] font-mono text-[11px] uppercase tracking-wider text-neutral-400">
+                        <thead className="border-b border-slate-200 bg-slate-50 font-mono text-[11px] uppercase tracking-wider text-slate-500">
                           <tr>
                             <th className="px-5 py-4">Negocio / Razón</th>
                             <th className="px-5 py-4">Decisor & WhatsApp</th>
@@ -2217,10 +2261,10 @@ export default function AdminDashboard() {
                             <th className="px-5 py-4 text-right">Acciones</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-white/5">
+                        <tbody className="divide-y divide-slate-100">
                           {filteredClients.length === 0 ? (
                             <tr>
-                              <td colSpan="6" className="p-8 text-center font-mono text-neutral-400">
+                              <td colSpan="6" className="p-8 text-center font-mono text-slate-400">
                                 No se encontraron clientes con los filtros aplicados.
                               </td>
                             </tr>
@@ -2236,12 +2280,12 @@ export default function AdminDashboard() {
                               const currentProg = client.progress ?? 25;
 
                               return (
-                                <tr key={client.id} className="transition-colors hover:bg-white/[0.02]">
+                                <tr key={client.id} className="transition-colors hover:bg-slate-50/70">
                                   {/* Negocio */}
                                   <td className="px-5 py-4">
-                                    <div className="font-semibold text-white">{client.businessName}</div>
-                                    <span className={`inline-block mt-1 rounded px-1.5 py-0.5 text-[9px] font-mono uppercase ${
-                                      client.type === 'leads' ? 'bg-blue-500/10 text-blue-300' : 'bg-zenda-cyan/10 text-zenda-cyan'
+                                    <div className="font-semibold text-slate-900">{client.businessName}</div>
+                                    <span className={`inline-block mt-1 rounded px-1.5 py-0.5 text-[9px] font-mono uppercase font-semibold ${
+                                      client.type === 'leads' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-cyan-50 text-cyan-700 border border-cyan-200'
                                     }`}>
                                       {client.type === 'leads' ? 'Diagnóstico 60s' : 'Portal Onboarding'}
                                     </span>
@@ -2249,12 +2293,12 @@ export default function AdminDashboard() {
 
                                   {/* Decisor & WhatsApp */}
                                   <td className="px-5 py-4">
-                                    <div className="text-neutral-200">{client.decisionMaker}</div>
-                                    <div className="font-mono text-[11px] text-neutral-400">{client.contact}</div>
+                                    <div className="text-slate-900 font-medium">{client.decisionMaker}</div>
+                                    <div className="font-mono text-[11px] text-slate-500">{client.contact}</div>
                                   </td>
 
                                   {/* Ticket */}
-                                  <td className="px-5 py-4 font-mono text-neutral-300">
+                                  <td className="px-5 py-4 font-mono text-slate-700">
                                     {client.avgTicket || '—'}
                                   </td>
 
@@ -2263,7 +2307,7 @@ export default function AdminDashboard() {
                                     <select
                                       value={client.status || 'Nuevo'}
                                       onChange={(e) => updateClientStatus(client.id, e.target.value, client.type)}
-                                      className="rounded-full border border-white/10 bg-[#080B11] px-2.5 py-1 font-mono text-[11px] text-neutral-200 outline-none"
+                                      className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-mono text-[11px] text-slate-800 outline-none shadow-sm cursor-pointer"
                                     >
                                       <option value="Nuevo">Nuevo</option>
                                       <option value="En integración">En integración</option>
@@ -2282,9 +2326,9 @@ export default function AdminDashboard() {
                                         step="5"
                                         value={currentProg}
                                         onChange={(e) => updateClientProgress(client.id, e.target.value, client.type)}
-                                        className="w-20 accent-zenda-cyan cursor-pointer"
+                                        className="w-20 accent-slate-900 cursor-pointer"
                                       />
-                                      <span className="font-mono text-[11px] text-zenda-cyan font-bold">{currentProg}%</span>
+                                      <span className="font-mono text-[11px] text-slate-900 font-bold">{currentProg}%</span>
                                     </div>
                                   </td>
 
@@ -2295,7 +2339,7 @@ export default function AdminDashboard() {
                                         href={waUrl}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/20"
+                                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
                                       >
                                         <MessageCircle className="h-3.5 w-3.5" />
                                         WhatsApp
@@ -2304,7 +2348,7 @@ export default function AdminDashboard() {
                                       <button
                                         type="button"
                                         onClick={() => setSelectedClientDetail(client)}
-                                        className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1 font-mono text-[11px] text-neutral-300 hover:border-white/25 hover:text-white"
+                                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-mono text-[11px] font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-sm"
                                       >
                                         <Eye className="h-3.5 w-3.5" />
                                         Ficha
@@ -2325,69 +2369,69 @@ export default function AdminDashboard() {
               {/* SUBSECCIÓN B: CAJA NETA & MOVIMIENTOS */}
               {financeSubTab === 'ledger' && (
                 <div className="space-y-6">
-                  {/* Tarjetas KPI Superiores */}
+                  {/* Tarjetas KPI */}
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 backdrop-blur-xl">
-                      <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-neutral-400">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                      <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-slate-500">
                         <span>Total Ingresos</span>
-                        <ArrowUpRight className="h-4 w-4 text-emerald-400" />
+                        <ArrowUpRight className="h-4 w-4 text-emerald-600" />
                       </div>
-                      <div className="mt-3 text-2xl font-bold text-emerald-400">
+                      <div className="mt-3 text-2xl font-bold tracking-tight text-emerald-600">
                         S/ {totalIncomePEN.toLocaleString()}
                       </div>
-                      <div className="text-xs text-neutral-400 font-mono mt-1">
+                      <div className="text-xs text-slate-500 font-mono mt-1">
                         + US$ {totalIncomeUSD.toLocaleString()} USD
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 backdrop-blur-xl">
-                      <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-neutral-400">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                      <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-slate-500">
                         <span>Total Egresos</span>
-                        <ArrowDownRight className="h-4 w-4 text-rose-400" />
+                        <ArrowDownRight className="h-4 w-4 text-rose-600" />
                       </div>
-                      <div className="mt-3 text-2xl font-bold text-rose-400">
+                      <div className="mt-3 text-2xl font-bold tracking-tight text-rose-600">
                         S/ {totalExpensePEN.toLocaleString()}
                       </div>
-                      <div className="text-xs text-neutral-400 font-mono mt-1">
+                      <div className="text-xs text-slate-500 font-mono mt-1">
                         + US$ {totalExpenseUSD.toLocaleString()} USD
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-zenda-cyan/30 bg-zenda-cyan/[0.04] p-6 backdrop-blur-xl">
-                      <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-zenda-cyan">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                      <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-slate-500">
                         <span>Margen Neto Operativo</span>
-                        <Percent className="h-4 w-4 text-zenda-cyan" />
+                        <Percent className="h-4 w-4 text-slate-900" />
                       </div>
-                      <div className={`mt-3 text-2xl font-bold ${netPEN >= 0 ? 'text-white' : 'text-rose-400'}`}>
+                      <div className={`mt-3 text-2xl font-bold tracking-tight ${netPEN >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
                         S/ {netPEN.toLocaleString()}{' '}
-                        <span className="text-sm font-normal text-zenda-cyan font-mono">({marginPEN}%)</span>
+                        <span className="text-sm font-normal text-slate-500 font-mono">({marginPEN}%)</span>
                       </div>
-                      <div className="text-xs text-zenda-cyan/80 font-mono mt-1">
+                      <div className="text-xs text-slate-500 font-mono mt-1">
                         Neto USD: + US$ {netUSD.toLocaleString()}
                       </div>
                     </div>
                   </div>
 
-                  {/* Botón para abrir modal de nuevo movimiento */}
+                  {/* Botón de nuevo movimiento */}
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-base font-bold text-white">Registro de Movimientos Financieros</h3>
-                      <p className="text-xs text-neutral-400">Almacenados en la colección Firestore: <code>zenda_finances</code></p>
+                      <h3 className="text-base font-bold text-slate-900">Registro de Movimientos Financieros</h3>
+                      <p className="text-xs text-slate-500">Almacenados en la colección Firestore: <code>zenda_finances</code></p>
                     </div>
                     <button
                       type="button"
                       onClick={() => setFinanceModalOpen(true)}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-zenda-cyan to-cyan-300 px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider text-neutral-950 shadow-[0_0_15px_rgba(0,229,255,0.25)] transition-all hover:scale-[1.02]"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 py-2 font-mono text-xs font-bold tracking-wider text-white shadow-sm transition-all hover:bg-slate-800"
                     >
                       <Plus className="h-4 w-4" />
-                      Nuevo Movimiento
+                      + NUEVO MOVIMIENTO
                     </button>
                   </div>
 
-                  {/* Tabla de Finanzas */}
-                  <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#0A0E17]/80 backdrop-blur-xl shadow-2xl">
+                  {/* Tabla de Finanzas en Blanco */}
+                  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                     <table className="w-full text-left text-xs">
-                      <thead className="border-b border-white/5 bg-white/[0.02] font-mono text-[11px] uppercase tracking-wider text-neutral-400">
+                      <thead className="border-b border-slate-200 bg-slate-50 font-mono text-[11px] uppercase tracking-wider text-slate-500">
                         <tr>
                           <th className="px-5 py-3.5">Fecha</th>
                           <th className="px-5 py-3.5">Concepto</th>
@@ -2397,13 +2441,13 @@ export default function AdminDashboard() {
                           <th className="px-5 py-3.5 text-right">Acción</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/5">
+                      <tbody className="divide-y divide-slate-100">
                         {finances.map((f) => (
-                          <tr key={f.id} className="transition-colors hover:bg-white/[0.02]">
-                            <td className="px-5 py-3.5 font-mono text-neutral-400">{f.date}</td>
-                            <td className="px-5 py-3.5 font-medium text-white">{f.concept}</td>
+                          <tr key={f.id} className="transition-colors hover:bg-slate-50/70">
+                            <td className="px-5 py-3.5 font-mono text-slate-600">{f.date}</td>
+                            <td className="px-5 py-3.5 font-medium text-slate-900">{f.concept}</td>
                             <td className="px-5 py-3.5">
-                              <span className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-neutral-300">
+                              <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-700">
                                 {f.category}
                               </span>
                             </td>
@@ -2411,15 +2455,15 @@ export default function AdminDashboard() {
                               <span
                                 className={`rounded-full px-2 py-0.5 text-[10px] font-mono font-semibold uppercase ${
                                   f.type === 'ingreso'
-                                    ? 'bg-emerald-500/10 text-emerald-300'
-                                    : 'bg-rose-500/10 text-rose-300'
+                                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                    : 'bg-rose-50 text-rose-800 border border-rose-200'
                                 }`}
                               >
                                 {f.type}
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-right font-mono font-semibold">
-                              <span className={f.type === 'ingreso' ? 'text-emerald-400' : 'text-rose-400'}>
+                              <span className={f.type === 'ingreso' ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'}>
                                 {f.type === 'ingreso' ? '+' : '-'} {f.currency === 'PEN' ? 'S/' : '$'}{' '}
                                 {Number(f.amount).toFixed(2)}
                               </span>
@@ -2428,7 +2472,7 @@ export default function AdminDashboard() {
                               <button
                                 type="button"
                                 onClick={() => handleDeleteFinance(f.id)}
-                                className="rounded p-1 text-neutral-500 hover:text-rose-400"
+                                className="rounded p-1 text-slate-400 hover:text-rose-600"
                                 title="Eliminar"
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -2447,27 +2491,27 @@ export default function AdminDashboard() {
       </div>
 
       {/* ==================================================================== */}
-      {/* MODALES DEL DASHBOARD */}
+      {/* MODALES DEL DASHBOARD (FONDO BLANCO, BORDES LIMPIOS, ESTILO VERCEL) */}
       {/* ==================================================================== */}
 
       {/* Modal 1: Nueva Tarea de Sprint */}
       {sprintModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
           onClick={() => setSprintModalOpen(false)}
         >
           <div
-            className="w-full max-w-lg rounded-3xl border border-white/10 bg-[#0C1019] p-6 shadow-2xl"
+            className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl text-slate-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-white/10 pb-4">
-              <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-zenda-cyan">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-900">
                 Nueva Tarea de Sprint
               </h3>
               <button
                 type="button"
                 onClick={() => setSprintModalOpen(false)}
-                className="rounded-full p-1.5 text-neutral-400 hover:bg-white/10 hover:text-white"
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -2475,24 +2519,28 @@ export default function AdminDashboard() {
 
             <form onSubmit={handleAddSprint} className="mt-5 space-y-4 text-xs">
               <div>
-                <label className="block font-mono text-neutral-300 mb-1">Título de la Tarea / Entregable</label>
+                <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                  Título de la Tarea / Entregable
+                </label>
                 <input
                   type="text"
                   required
                   placeholder="Ej. Cierre de guiones para batch de reels"
                   value={newSprint.title}
                   onChange={(e) => setNewSprint({ ...newSprint, title: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan"
+                  className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 transition-all"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Asignado a</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Asignado a
+                  </label>
                   <select
                     value={newSprint.assignee}
                     onChange={(e) => setNewSprint({ ...newSprint, assignee: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   >
                     <option value="Angel">Angel</option>
                     <option value="Marco">Marco</option>
@@ -2500,11 +2548,13 @@ export default function AdminDashboard() {
                 </div>
 
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Prioridad</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Prioridad
+                  </label>
                   <select
                     value={newSprint.priority}
                     onChange={(e) => setNewSprint({ ...newSprint, priority: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   >
                     <option value="Urgente">Urgente</option>
                     <option value="Alta">Alta</option>
@@ -2515,13 +2565,15 @@ export default function AdminDashboard() {
               </div>
 
               <div>
-                <label className="block font-mono text-neutral-300 mb-1">Fecha Límite (Deadline)</label>
+                <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                  Fecha Límite (Deadline)
+                </label>
                 <input
                   type="date"
                   required
                   value={newSprint.deadline}
                   onChange={(e) => setNewSprint({ ...newSprint, deadline: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                  className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                 />
               </div>
 
@@ -2529,13 +2581,13 @@ export default function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setSprintModalOpen(false)}
-                  className="rounded-xl px-4 py-2 font-mono text-neutral-400 hover:text-white"
+                  className="rounded-xl px-4 py-2 font-mono text-slate-500 hover:text-slate-900"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl bg-gradient-to-r from-zenda-cyan to-cyan-300 px-5 py-2 font-mono font-bold text-neutral-950 shadow-[0_0_12px_rgba(0,229,255,0.25)] hover:scale-[1.02]"
+                  className="rounded-xl bg-[#0F172A] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition-all"
                 >
                   Guardar Tarea
                 </button>
@@ -2548,21 +2600,21 @@ export default function AdminDashboard() {
       {/* Modal 2: Nuevo Reel / Contenido */}
       {contentModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
           onClick={() => setContentModalOpen(false)}
         >
           <div
-            className="w-full max-w-lg rounded-3xl border border-white/10 bg-[#0C1019] p-6 shadow-2xl"
+            className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl text-slate-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-white/10 pb-4">
-              <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-purple-400">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-900">
                 Nuevo Reel en Pipeline
               </h3>
               <button
                 type="button"
                 onClick={() => setContentModalOpen(false)}
-                className="rounded-full p-1.5 text-neutral-400 hover:bg-white/10 hover:text-white"
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -2570,36 +2622,42 @@ export default function AdminDashboard() {
 
             <form onSubmit={handleAddContent} className="mt-5 space-y-4 text-xs">
               <div>
-                <label className="block font-mono text-neutral-300 mb-1">Cliente / Cuenta</label>
+                <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                  Cliente / Cuenta
+                </label>
                 <input
                   type="text"
                   required
                   placeholder="Ej. Dolciangel Pastelería"
                   value={newContent.client}
                   onChange={(e) => setNewContent({ ...newContent, client: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan"
+                  className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 transition-all"
                 />
               </div>
 
               <div>
-                <label className="block font-mono text-neutral-300 mb-1">Hook o Título del Video</label>
+                <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                  Hook o Título del Video
+                </label>
                 <textarea
                   rows={2}
                   required
                   placeholder="Ej. El error de S/ 3,000 que cometen las pastelerías al tomar pedidos por WhatsApp..."
                   value={newContent.title}
                   onChange={(e) => setNewContent({ ...newContent, title: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan"
+                  className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 transition-all"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Etapa Inicial</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Etapa Inicial
+                  </label>
                   <select
                     value={newContent.stage}
                     onChange={(e) => setNewContent({ ...newContent, stage: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   >
                     {contentStages.map((st) => (
                       <option key={st} value={st}>{st}</option>
@@ -2608,11 +2666,13 @@ export default function AdminDashboard() {
                 </div>
 
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Responsable</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Responsable
+                  </label>
                   <select
                     value={newContent.assignee}
                     onChange={(e) => setNewContent({ ...newContent, assignee: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   >
                     <option value="Angel">Angel</option>
                     <option value="Marco">Marco</option>
@@ -2622,24 +2682,28 @@ export default function AdminDashboard() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Fecha de Publicación</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Fecha de Publicación
+                  </label>
                   <input
                     type="date"
                     required
                     value={newContent.publishDate}
                     onChange={(e) => setNewContent({ ...newContent, publishDate: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">URL Drive / Guion (Opcional)</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    URL Drive / Guion (Opcional)
+                  </label>
                   <input
                     type="url"
                     placeholder="https://drive.google.com/..."
                     value={newContent.driveUrl}
                     onChange={(e) => setNewContent({ ...newContent, driveUrl: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   />
                 </div>
               </div>
@@ -2648,13 +2712,13 @@ export default function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setContentModalOpen(false)}
-                  className="rounded-xl px-4 py-2 font-mono text-neutral-400 hover:text-white"
+                  className="rounded-xl px-4 py-2 font-mono text-slate-500 hover:text-slate-900"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl bg-gradient-to-r from-purple-400 to-indigo-400 px-5 py-2 font-mono font-bold text-neutral-950 hover:scale-[1.02]"
+                  className="rounded-xl bg-[#0F172A] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition-all"
                 >
                   Guardar Reel
                 </button>
@@ -2667,21 +2731,21 @@ export default function AdminDashboard() {
       {/* Modal 3: Nuevo Evento de Calendario */}
       {calendarModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
           onClick={() => setCalendarModalOpen(false)}
         >
           <div
-            className="w-full max-w-lg rounded-3xl border border-white/10 bg-[#0C1019] p-6 shadow-2xl"
+            className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl text-slate-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-white/10 pb-4">
-              <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-zenda-cyan">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-900">
                 Agendar Evento / Rodaje
               </h3>
               <button
                 type="button"
                 onClick={() => setCalendarModalOpen(false)}
-                className="rounded-full p-1.5 text-neutral-400 hover:bg-white/10 hover:text-white"
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -2689,36 +2753,42 @@ export default function AdminDashboard() {
 
             <form onSubmit={handleAddCalendarEvent} className="mt-5 space-y-4 text-xs">
               <div>
-                <label className="block font-mono text-neutral-300 mb-1">Título del Evento / Motivo</label>
+                <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                  Título del Evento / Motivo
+                </label>
                 <input
                   type="text"
                   required
                   placeholder="Ej. Rodaje presencial: Set de 8 reels"
                   value={newCalendarEvent.title}
                   onChange={(e) => setNewCalendarEvent({ ...newCalendarEvent, title: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan"
+                  className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 transition-all"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Cliente / Cuenta</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Cliente / Cuenta
+                  </label>
                   <input
                     type="text"
                     required
                     placeholder="Ej. Valkiria Fitness"
                     value={newCalendarEvent.client}
                     onChange={(e) => setNewCalendarEvent({ ...newCalendarEvent, client: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Tipo de Evento</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Tipo de Evento
+                  </label>
                   <select
                     value={newCalendarEvent.type}
                     onChange={(e) => setNewCalendarEvent({ ...newCalendarEvent, type: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   >
                     <option value="Rodaje presencial">🎥 Rodaje presencial</option>
                     <option value="Publicación / Entrega">🚀 Publicación / Entrega</option>
@@ -2730,33 +2800,39 @@ export default function AdminDashboard() {
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block font-mono text-neutral-300 mb-1">Fecha</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Fecha
+                  </label>
                   <input
                     type="date"
                     required
                     value={newCalendarEvent.date}
                     onChange={(e) => setNewCalendarEvent({ ...newCalendarEvent, date: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Hora</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Hora
+                  </label>
                   <input
                     type="time"
                     value={newCalendarEvent.time}
                     onChange={(e) => setNewCalendarEvent({ ...newCalendarEvent, time: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-mono text-neutral-300 mb-1">Responsable</label>
+                <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                  Responsable
+                </label>
                 <select
                   value={newCalendarEvent.assignee}
                   onChange={(e) => setNewCalendarEvent({ ...newCalendarEvent, assignee: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                  className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                 >
                   <option value="Angel">Angel</option>
                   <option value="Marco">Marco</option>
@@ -2765,13 +2841,15 @@ export default function AdminDashboard() {
               </div>
 
               <div>
-                <label className="block font-mono text-neutral-300 mb-1">Notas u Observaciones (Opcional)</label>
+                <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                  Notas u Observaciones (Opcional)
+                </label>
                 <textarea
                   rows={2}
                   placeholder="Llevar equipo de iluminación, trípode y micrófonos inalámbricos..."
                   value={newCalendarEvent.notes}
                   onChange={(e) => setNewCalendarEvent({ ...newCalendarEvent, notes: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan"
+                  className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 transition-all"
                 />
               </div>
 
@@ -2779,13 +2857,13 @@ export default function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setCalendarModalOpen(false)}
-                  className="rounded-xl px-4 py-2 font-mono text-neutral-400 hover:text-white"
+                  className="rounded-xl px-4 py-2 font-mono text-slate-500 hover:text-slate-900"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl bg-gradient-to-r from-zenda-cyan to-cyan-300 px-5 py-2 font-mono font-bold text-neutral-950 shadow-[0_0_12px_rgba(0,229,255,0.25)] hover:scale-[1.02]"
+                  className="rounded-xl bg-[#0F172A] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition-all"
                 >
                   Agendar Evento
                 </button>
@@ -2798,21 +2876,21 @@ export default function AdminDashboard() {
       {/* Modal 4: Nuevo Movimiento Financiero */}
       {financeModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
           onClick={() => setFinanceModalOpen(false)}
         >
           <div
-            className="w-full max-w-lg rounded-3xl border border-white/10 bg-[#0C1019] p-6 shadow-2xl"
+            className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl text-slate-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-white/10 pb-4">
-              <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-emerald-400">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-900">
                 Registrar Movimiento Financiero
               </h3>
               <button
                 type="button"
                 onClick={() => setFinanceModalOpen(false)}
-                className="rounded-full p-1.5 text-neutral-400 hover:bg-white/10 hover:text-white"
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -2821,11 +2899,13 @@ export default function AdminDashboard() {
             <form onSubmit={handleAddFinance} className="mt-5 space-y-4 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Tipo</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Tipo
+                  </label>
                   <select
                     value={newFinance.type}
                     onChange={(e) => setNewFinance({ ...newFinance, type: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   >
                     <option value="ingreso">Ingreso (+)</option>
                     <option value="egreso">Egreso (-)</option>
@@ -2833,11 +2913,13 @@ export default function AdminDashboard() {
                 </div>
 
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Moneda</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Moneda
+                  </label>
                   <select
                     value={newFinance.currency}
                     onChange={(e) => setNewFinance({ ...newFinance, currency: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   >
                     <option value="PEN">Soles (PEN S/)</option>
                     <option value="USD">Dólares (USD $)</option>
@@ -2846,20 +2928,24 @@ export default function AdminDashboard() {
               </div>
 
               <div>
-                <label className="block font-mono text-neutral-300 mb-1">Concepto</label>
+                <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                  Concepto
+                </label>
                 <input
                   type="text"
                   required
                   placeholder="Ej. Retainer mensual Automatización - Dolciangel"
                   value={newFinance.concept}
                   onChange={(e) => setNewFinance({ ...newFinance, concept: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan"
+                  className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 transition-all"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Monto</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Monto
+                  </label>
                   <input
                     type="number"
                     step="0.01"
@@ -2867,16 +2953,18 @@ export default function AdminDashboard() {
                     placeholder="0.00"
                     value={newFinance.amount}
                     onChange={(e) => setNewFinance({ ...newFinance, amount: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-mono text-neutral-300 mb-1">Categoría</label>
+                  <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                    Categoría
+                  </label>
                   <select
                     value={newFinance.category}
                     onChange={(e) => setNewFinance({ ...newFinance, category: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                    className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                   >
                     <option value="Retainer Cliente">Retainer Cliente</option>
                     <option value="Setup">Setup / Implementación</option>
@@ -2889,13 +2977,15 @@ export default function AdminDashboard() {
               </div>
 
               <div>
-                <label className="block font-mono text-neutral-300 mb-1">Fecha</label>
+                <label className="block font-mono text-slate-600 uppercase text-[10px] tracking-wider mb-1">
+                  Fecha
+                </label>
                 <input
                   type="date"
                   required
                   value={newFinance.date}
                   onChange={(e) => setNewFinance({ ...newFinance, date: e.target.value })}
-                  className="w-full rounded-xl border border-white/10 bg-[#080B11] p-3 text-white outline-none focus:border-zenda-cyan font-mono"
+                  className="w-full rounded-xl border border-slate-300 bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:bg-white focus:border-slate-900 font-mono transition-all"
                 />
               </div>
 
@@ -2903,13 +2993,13 @@ export default function AdminDashboard() {
                 <button
                   type="button"
                   onClick={() => setFinanceModalOpen(false)}
-                  className="rounded-xl px-4 py-2 font-mono text-neutral-400 hover:text-white"
+                  className="rounded-xl px-4 py-2 font-mono text-slate-500 hover:text-slate-900"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 px-5 py-2 font-mono font-bold text-neutral-950 hover:scale-[1.02]"
+                  className="rounded-xl bg-[#0F172A] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-slate-800 transition-all"
                 >
                   Guardar Movimiento
                 </button>
@@ -2922,23 +3012,23 @@ export default function AdminDashboard() {
       {/* Modal 5: Ficha Completa de Onboarding */}
       {selectedClientDetail && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
           onClick={() => setSelectedClientDetail(null)}
         >
           <div
-            className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-[#0C1019] p-6 shadow-2xl sm:p-8"
+            className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl text-slate-900 sm:p-8"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between border-b border-white/10 pb-5">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-5">
               <div>
-                <span className="font-mono text-xs uppercase tracking-widest text-zenda-cyan">
+                <span className="font-mono text-xs uppercase tracking-widest text-cyan-700 font-semibold">
                   Ficha Completa de Cliente
                 </span>
-                <h2 className="mt-1 text-2xl font-bold text-white">
+                <h2 className="mt-1 text-2xl font-bold text-slate-900">
                   {selectedClientDetail.businessName}
                 </h2>
                 {selectedClientDetail.rucOrLegal && (
-                  <p className="font-mono text-xs text-neutral-400">
+                  <p className="font-mono text-xs text-slate-500">
                     RUC / Razón: {selectedClientDetail.rucOrLegal}
                   </p>
                 )}
@@ -2946,7 +3036,7 @@ export default function AdminDashboard() {
               <button
                 type="button"
                 onClick={() => setSelectedClientDetail(null)}
-                className="rounded-full p-2 text-neutral-400 hover:bg-white/10 hover:text-white"
+                className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-900"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -2954,33 +3044,33 @@ export default function AdminDashboard() {
 
             <div className="mt-6 space-y-5 text-sm">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
-                  <p className="font-mono text-[11px] uppercase tracking-wider text-neutral-400">Decisor Principal</p>
-                  <p className="mt-1 font-semibold text-white">{selectedClientDetail.decisionMaker}</p>
-                  <p className="mt-0.5 font-mono text-xs text-neutral-300">{selectedClientDetail.contact}</p>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="font-mono text-[11px] uppercase tracking-wider text-slate-500">Decisor Principal</p>
+                  <p className="mt-1 font-semibold text-slate-900">{selectedClientDetail.decisionMaker}</p>
+                  <p className="mt-0.5 font-mono text-xs text-slate-600">{selectedClientDetail.contact}</p>
                 </div>
-                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
-                  <p className="font-mono text-[11px] uppercase tracking-wider text-neutral-400">Canal & Volumen</p>
-                  <p className="mt-1 font-semibold text-white">{selectedClientDetail.mainChannel || 'WhatsApp'}</p>
-                  <p className="mt-0.5 text-xs text-neutral-300">{selectedClientDetail.weeklyVolume || 'Por definir'}</p>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="font-mono text-[11px] uppercase tracking-wider text-slate-500">Canal & Volumen</p>
+                  <p className="mt-1 font-semibold text-slate-900">{selectedClientDetail.mainChannel || 'WhatsApp'}</p>
+                  <p className="mt-0.5 text-xs text-slate-600">{selectedClientDetail.weeklyVolume || 'Por definir'}</p>
                 </div>
               </div>
 
-              <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
-                <p className="font-mono text-[11px] uppercase tracking-wider text-neutral-400">Producto o Servicio Estrella</p>
-                <p className="mt-1 text-white">{selectedClientDetail.starProduct}</p>
-                <p className="mt-1 text-xs text-zenda-cyan font-mono">Ticket: {selectedClientDetail.avgTicket}</p>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="font-mono text-[11px] uppercase tracking-wider text-slate-500">Producto o Servicio Estrella</p>
+                <p className="mt-1 font-medium text-slate-900">{selectedClientDetail.starProduct}</p>
+                <p className="mt-1 text-xs text-cyan-800 font-mono font-semibold">Ticket: {selectedClientDetail.avgTicket}</p>
               </div>
 
-              <div className="rounded-xl border border-rose-500/20 bg-rose-950/20 p-4">
-                <p className="font-mono text-[11px] uppercase tracking-wider text-rose-400">Cuello de Botella Declarado</p>
-                <p className="mt-1 text-neutral-200 leading-relaxed">{selectedClientDetail.bottleneckProcess}</p>
+              <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-4">
+                <p className="font-mono text-[11px] uppercase tracking-wider text-rose-700 font-semibold">Cuello de Botella Declarado</p>
+                <p className="mt-1 text-slate-800 leading-relaxed">{selectedClientDetail.bottleneckProcess}</p>
               </div>
 
-              <div className="rounded-xl border border-zenda-cyan/20 bg-zenda-cyan/[0.04] p-4">
-                <p className="font-mono text-[11px] uppercase tracking-wider text-zenda-cyan">Meta a 90 Días</p>
-                <p className="mt-1 font-semibold text-white">{selectedClientDetail.primaryGoal}</p>
-                <p className="mt-1 text-xs text-neutral-300 leading-relaxed">{selectedClientDetail.goalDetail}</p>
+              <div className="rounded-xl border border-cyan-200 bg-cyan-50/60 p-4">
+                <p className="font-mono text-[11px] uppercase tracking-wider text-cyan-800 font-semibold">Meta a 90 Días</p>
+                <p className="mt-1 font-semibold text-slate-900">{selectedClientDetail.primaryGoal}</p>
+                <p className="mt-1 text-xs text-slate-700 leading-relaxed">{selectedClientDetail.goalDetail}</p>
               </div>
 
               {/* Accesos y links */}
@@ -2990,7 +3080,7 @@ export default function AdminDashboard() {
                     href={selectedClientDetail.driveFolder}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-xs text-white transition-all hover:border-zenda-cyan hover:text-zenda-cyan"
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-medium text-slate-800 transition-all hover:border-slate-900 shadow-sm"
                   >
                     <FolderGit2 className="h-4 w-4" />
                     Carpeta de Drive
@@ -3005,7 +3095,7 @@ export default function AdminDashboard() {
                     }
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-xs text-white transition-all hover:border-white/20 hover:text-white"
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-medium text-slate-800 transition-all hover:border-slate-900 shadow-sm"
                   >
                     <Globe className="h-4 w-4" />
                     Redes / Web
