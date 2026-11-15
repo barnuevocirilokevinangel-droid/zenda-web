@@ -326,7 +326,7 @@ export default function ClientOnboarding() {
             <input
               id="businessName"
               type="text"
-              placeholder="Ej. Dolciangel, Studio Moda, Valkiria SAC"
+              placeholder="Ej. Dolciangel, King's Barber Shop, La Lanchita"
               value={values.businessName}
               onChange={onText('businessName')}
               className={`w-full rounded-xl border bg-white/[0.03] px-4 py-3.5 text-base text-white placeholder:text-neutral-500 transition-all outline-none ${
