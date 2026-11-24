@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Activity,
   ArrowDownRight,
   ArrowLeft,
   ArrowUpRight,
@@ -24,7 +23,6 @@ import {
   FileText,
   Film,
   Filter,
-  Flame,
   FolderGit2,
   Globe,
   LayoutDashboard,
@@ -58,30 +56,30 @@ const QUEST_DIFFICULTIES = [
     label: 'Guion',
     badgeLabel: '+100 XP · Guion',
     xp: 100,
-    colorClass: 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300',
+    colorClass: 'border-[#E2E8F0] bg-[#F8FAFC] text-[#0F172A]',
   },
   {
     id: 'Grabación',
     label: 'Grabación',
     badgeLabel: '+150 XP · Grabación',
     xp: 150,
-    colorClass: 'border-orange-500/40 bg-orange-500/15 text-orange-300',
+    colorClass: 'border-[#0066C5]/25 bg-[#0066C5]/10 text-[#0066C5]',
   },
   {
     id: 'Reel Publicado',
     label: 'Reel Publicado',
     badgeLabel: '+200 XP · Reel Publicado',
     xp: 200,
-    colorClass: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300',
+    colorClass: 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]',
   },
 ];
 
-const CONFETTI_PARTICLES = Array.from({ length: 28 }, (_, i) => ({
+const CONFETTI_PARTICLES = Array.from({ length: 24 }, (_, i) => ({
   id: i,
-  angle: (i / 28) * Math.PI * 2,
+  angle: (i / 24) * Math.PI * 2,
   distance: 90 + (i % 5) * 45,
-  size: 6 + (i % 4) * 3,
-  color: ['#06B6D4', '#F97316', '#10B981', '#FACC15', '#38BDF8', '#FB923C'][i % 6],
+  size: 6 + (i % 4) * 2,
+  color: ['#0066C5', '#10B981', '#0F172A', '#38BDF8'][i % 4],
 }));
 
 /**
@@ -428,13 +426,25 @@ export default function AdminDashboard() {
   const [celebrationBurst, setCelebrationBurst] = useState(false);
   const [healedClientFlashId, setHealedClientFlashId] = useState(null);
   const [floatingXpPopup, setFloatingXpPopup] = useState(null); // { player: 'Kevin' | 'Marco', amount: 150, label: '+150 XP' }
-  const [simulateBefore9AM, setSimulateBefore9AM] = useState(false);
 
   // Estado RPG sincronizado en tiempo real con Firestore ('zenda_system/rpg_state')
   // manteniendo localStorage ('zenda_rpg_os_v1') únicamente como caché rápida de arranque
-  const [rpgSyncOnline, setRpgSyncOnline] = useState(false);
+  const [rpgSyncOnline, setRpgSyncOnline] = useState(() => Boolean(isFirebaseConfigured && db));
   const [rpgState, setRpgState] = useState(() => {
+    const defaultClientHp = {
+      'client-zenda-agency': 100,
+      'client-dolciangel': 100,
+      'client-lalanchita': 100,
+      'client-kings-barber-shop': 100,
+    };
     const defaults = {
+      xp: { Kevin: 1200, Marco: 1150 },
+      level: { Kevin: 3, Marco: 3 },
+      streak: { Kevin: 4, Marco: 4 },
+      clientsHp: defaultClientHp,
+      weeklyReels: 0,
+      weeklyReward: 'Cena Libre + Tarde Libre de Socios',
+      quests: [],
       kevinBaseXP: 1200,
       marcoBaseXP: 1150,
       kevinLevel: 3,
@@ -446,12 +456,7 @@ export default function AdminDashboard() {
       weeklyRewardText: 'Cena Libre + Tarde Libre de Socios',
       soundEnabled: true,
       manualHoursOverride: {},
-      clientHpMap: {
-        'client-zenda-agency': 100,
-        'client-dolciangel': 100,
-        'client-lalanchita': 100,
-        'client-kings-barber-shop': 100,
-      },
+      clientHpMap: defaultClientHp,
       manualBossReelsBonus: 0,
       bossChestReelsCount: 0,
       updatedAt: '',
@@ -459,7 +464,25 @@ export default function AdminDashboard() {
     try {
       const raw = localStorage.getItem('zenda_rpg_os_v1');
       if (!raw) return defaults;
-      return { ...defaults, ...JSON.parse(raw) };
+      const parsed = JSON.parse(raw);
+      return {
+        ...defaults,
+        ...parsed,
+        xp: parsed.xp || {
+          Kevin: Number(parsed.kevinBaseXP ?? 1200),
+          Marco: Number(parsed.marcoBaseXP ?? 1150),
+        },
+        level: parsed.level || {
+          Kevin: Number(parsed.kevinLevel ?? 3),
+          Marco: Number(parsed.marcoLevel ?? 3),
+        },
+        streak: parsed.streak || {
+          Kevin: Number(parsed.kevinEarlyStreak ?? 4),
+          Marco: Number(parsed.marcoEarlyStreak ?? 4),
+        },
+        clientsHp: parsed.clientsHp || parsed.clientHpMap || defaultClientHp,
+        weeklyReward: parsed.weeklyReward || parsed.weeklyRewardText || defaults.weeklyReward,
+      };
     } catch {
       return defaults;
     }
@@ -470,23 +493,78 @@ export default function AdminDashboard() {
     try {
       const { doc, setDoc } = await import('firebase/firestore');
       await setDoc(doc(db, 'zenda_system', 'rpg_state'), payload, { merge: true });
+      setRpgSyncOnline(true);
     } catch (err) {
       console.warn('[Firestore] Error sincronizando zenda_system/rpg_state:', err);
+      try {
+        const { doc, setDoc } = await import('firebase/firestore');
+        await setDoc(
+          doc(db, 'zenda_clients', 'client-zenda-agency'),
+          { rpgStateMirror: payload },
+          { merge: true },
+        );
+        setRpgSyncOnline(true);
+      } catch {
+        // ignore fallback error
+      }
     }
   };
 
   const updateRpgState = (updater) => {
     setRpgState((prev) => {
       const partial = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
-      const kevinXP = Number(partial.kevinBaseXP ?? prev.kevinBaseXP ?? 1200);
-      const marcoXP = Number(partial.marcoBaseXP ?? prev.marcoBaseXP ?? 1150);
+      const kevinXP = Number(
+        partial.kevinBaseXP ?? partial.xp?.Kevin ?? prev.kevinBaseXP ?? prev.xp?.Kevin ?? 1200,
+      );
+      const marcoXP = Number(
+        partial.marcoBaseXP ?? partial.xp?.Marco ?? prev.marcoBaseXP ?? prev.xp?.Marco ?? 1150,
+      );
+      const kevinLvl = Math.floor(kevinXP / XP_PER_LEVEL) + 1;
+      const marcoLvl = Math.floor(marcoXP / XP_PER_LEVEL) + 1;
+      const kevinStrk = Number(
+        partial.kevinEarlyStreak ?? partial.streak?.Kevin ?? prev.kevinEarlyStreak ?? 4,
+      );
+      const marcoStrk = Number(
+        partial.marcoEarlyStreak ?? partial.streak?.Marco ?? prev.marcoEarlyStreak ?? 4,
+      );
+      const rewardStr =
+        partial.weeklyRewardText ??
+        partial.weeklyReward ??
+        prev.weeklyRewardText ??
+        'Cena Libre + Tarde Libre de Socios';
+      const mergedHp = {
+        ...(prev.clientHpMap || {}),
+        ...(prev.clientsHp || {}),
+        ...(partial.clientHpMap || {}),
+        ...(partial.clientsHp || {}),
+      };
+      const reelsCount = Number(
+        partial.weeklyReels ?? partial.bossChestReelsCount ?? prev.bossChestReelsCount ?? 0,
+      );
+
       const next = {
         ...prev,
         ...partial,
         kevinBaseXP: kevinXP,
         marcoBaseXP: marcoXP,
-        kevinLevel: Math.floor(kevinXP / XP_PER_LEVEL) + 1,
-        marcoLevel: Math.floor(marcoXP / XP_PER_LEVEL) + 1,
+        kevinLevel: kevinLvl,
+        marcoLevel: marcoLvl,
+        kevinEarlyStreak: kevinStrk,
+        marcoEarlyStreak: marcoStrk,
+        weeklyRewardText: rewardStr,
+        weeklyReward: rewardStr,
+        clientHpMap: mergedHp,
+        clientsHp: mergedHp,
+        weeklyReels: reelsCount,
+        bossChestReelsCount: reelsCount,
+        xp: { Kevin: kevinXP, Marco: marcoXP },
+        level: { Kevin: kevinLvl, Marco: marcoLvl },
+        streak: { Kevin: kevinStrk, Marco: marcoStrk },
+        quests: Array.isArray(partial.quests)
+          ? partial.quests
+          : Array.isArray(prev.quests)
+          ? prev.quests
+          : [],
         updatedAt: new Date().toISOString(),
       };
       try {
@@ -664,17 +742,57 @@ export default function AdminDashboard() {
               } else {
                 const cloudData = docSnap.data();
                 setRpgState((prev) => {
+                  const kevinXP = Number(
+                    cloudData.kevinBaseXP ?? cloudData.xp?.Kevin ?? prev.kevinBaseXP ?? 1200,
+                  );
+                  const marcoXP = Number(
+                    cloudData.marcoBaseXP ?? cloudData.xp?.Marco ?? prev.marcoBaseXP ?? 1150,
+                  );
+                  const kevinLvl = Math.floor(kevinXP / XP_PER_LEVEL) + 1;
+                  const marcoLvl = Math.floor(marcoXP / XP_PER_LEVEL) + 1;
+                  const kevinStrk = Number(
+                    cloudData.kevinEarlyStreak ??
+                      cloudData.streak?.Kevin ??
+                      prev.kevinEarlyStreak ??
+                      4,
+                  );
+                  const marcoStrk = Number(
+                    cloudData.marcoEarlyStreak ??
+                      cloudData.streak?.Marco ??
+                      prev.marcoEarlyStreak ??
+                      4,
+                  );
+                  const mergedHp = {
+                    ...(prev.clientHpMap || {}),
+                    ...(prev.clientsHp || {}),
+                    ...(cloudData.clientHpMap || {}),
+                    ...(cloudData.clientsHp || {}),
+                  };
+                  const rewardStr =
+                    cloudData.weeklyRewardText ??
+                    cloudData.weeklyReward ??
+                    prev.weeklyRewardText ??
+                    'Cena Libre + Tarde Libre de Socios';
                   const merged = {
                     ...prev,
                     ...cloudData,
+                    kevinBaseXP: kevinXP,
+                    marcoBaseXP: marcoXP,
+                    kevinLevel: kevinLvl,
+                    marcoLevel: marcoLvl,
+                    kevinEarlyStreak: kevinStrk,
+                    marcoEarlyStreak: marcoStrk,
+                    weeklyRewardText: rewardStr,
+                    weeklyReward: rewardStr,
+                    xp: { Kevin: kevinXP, Marco: marcoXP },
+                    level: { Kevin: kevinLvl, Marco: marcoLvl },
+                    streak: { Kevin: kevinStrk, Marco: marcoStrk },
                     manualHoursOverride: {
                       ...(prev.manualHoursOverride || {}),
                       ...(cloudData.manualHoursOverride || {}),
                     },
-                    clientHpMap: {
-                      ...(prev.clientHpMap || {}),
-                      ...(cloudData.clientHpMap || {}),
-                    },
+                    clientHpMap: mergedHp,
+                    clientsHp: mergedHp,
                   };
                   try {
                     localStorage.setItem('zenda_rpg_os_v1', JSON.stringify(merged));
@@ -686,7 +804,6 @@ export default function AdminDashboard() {
               }
             },
             (err) => {
-              setRpgSyncOnline(false);
               console.warn('[Firestore] zenda_system/rpg_state listener:', err);
             },
           );
@@ -700,6 +817,7 @@ export default function AdminDashboard() {
           unsubZendaClients = onSnapshot(
             colClients,
             async (snapshot) => {
+              setRpgSyncOnline(true);
               if (snapshot.empty) {
                 try {
                   await Promise.all(
@@ -717,6 +835,14 @@ export default function AdminDashboard() {
                 }));
                 const completeClients = ensureFourOfficialAccounts(liveClients);
                 setZendaClients(completeClients);
+
+                const zendaDoc = liveClients.find((c) => c.id === 'client-zenda-agency');
+                if (zendaDoc?.rpgStateMirror) {
+                  setRpgState((prev) => ({
+                    ...prev,
+                    ...zendaDoc.rpgStateMirror,
+                  }));
+                }
 
                 // Si faltaba alguna de las 4 cuentas oficiales (ej. Zenda Agency), la sincroniza en Firestore
                 for (const official of OFFICIAL_INITIAL_CLIENTS) {
@@ -760,8 +886,18 @@ export default function AdminDashboard() {
           unsubSprints = onSnapshot(
             qSprints,
             (snapshot) => {
+              setRpgSyncOnline(true);
               const live = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
               setSprints(live);
+              setRpgState((prev) => {
+                const next = { ...prev, quests: live };
+                try {
+                  localStorage.setItem('zenda_rpg_os_v1', JSON.stringify(next));
+                } catch {
+                  // ignore localStorage error
+                }
+                return next;
+              });
             },
             (err) => console.warn('[Firestore] Sprints listener:', err),
           );
@@ -1356,17 +1492,17 @@ export default function AdminDashboard() {
         getQuestRpgStatus(s) === 'Completado',
     ).length;
 
-    setSprints((prev) =>
-      prev.map((s) => (s.id === task.id ? { ...s, ...updates } : s)),
-    );
+    const nextQuestsList = sprints.map((s) => (s.id === task.id ? { ...s, ...updates } : s));
+    setSprints(nextQuestsList);
     setNowMs(Date.now());
 
-    // Actualizar XP del jugador en vivo
+    // Actualizar XP del jugador en vivo y sincronizar quests en zenda_system/rpg_state
     if (isNowCompleted && !wasCompleted) {
       const xpKey = assignee === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
       updateRpgState((prev) => ({
         ...prev,
         [xpKey]: Number(prev[xpKey] || 1000) + diffInfo.xp,
+        quests: nextQuestsList,
       }));
       showFloatingXp(assignee, diffInfo.xp, `+${diffInfo.xp} XP · ${diffInfo.label}`);
 
@@ -1374,21 +1510,25 @@ export default function AdminDashboard() {
       if (newDoneCount >= 3) {
         playRpgSound('fanfare', rpgState.soundEnabled);
         triggerCelebration();
-        showToast(`🏆 ¡${assignee} completó sus 3 Quests del Día! (+${diffInfo.xp} XP · BONUS DIARIO)`);
+        showToast(`¡${assignee} completó sus 3 Quests del Día! (+${diffInfo.xp} XP)`);
       } else {
         playRpgSound('xp', rpgState.soundEnabled);
-        showToast(`⚡ Quest Completada por ${assignee}: +${diffInfo.xp} XP (${diffInfo.label})`);
+        showToast(`Quest Completada por ${assignee}: +${diffInfo.xp} XP (${diffInfo.label})`);
       }
     } else if (!isNowCompleted && wasCompleted) {
       const xpKey = assignee === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
       updateRpgState((prev) => ({
         ...prev,
         [xpKey]: Math.max(0, Number(prev[xpKey] || 1000) - diffInfo.xp),
+        quests: nextQuestsList,
       }));
       showToast(`Quest reabierta: En Curso (${task.client})`);
     } else if (nextRpg === 'En Curso') {
+      updateRpgState((prev) => ({ ...prev, quests: nextQuestsList }));
       playRpgSound('advance', rpgState.soundEnabled);
-      showToast(`⚔️ Quest En Curso: ${task.title} (${task.client})`);
+      showToast(`Quest En Curso: ${task.title} (${task.client})`);
+    } else {
+      updateRpgState((prev) => ({ ...prev, quests: nextQuestsList }));
     }
 
     // Si se completa la misión, restaurar el HP del cliente al 100% y actualizar contador semanal
@@ -1448,9 +1588,11 @@ export default function AdminDashboard() {
    */
   const handleChangeQuestDifficulty = async (task, nextDiffId) => {
     if (!task) return;
-    setSprints((prev) =>
-      prev.map((s) => (s.id === task.id ? { ...s, questDifficulty: nextDiffId } : s)),
+    const nextList = sprints.map((s) =>
+      s.id === task.id ? { ...s, questDifficulty: nextDiffId } : s,
     );
+    setSprints(nextList);
+    updateRpgState((prev) => ({ ...prev, quests: nextList }));
     const info = QUEST_DIFFICULTIES.find((d) => d.id === nextDiffId) || QUEST_DIFFICULTIES[0];
     showToast(`Clase de Quest: ${info.badgeLabel}`);
 
@@ -1500,37 +1642,19 @@ export default function AdminDashboard() {
         videosPublicadosEstaSemana: nextVidCount,
         health: 'En ritmo',
       },
-      `💚 ¡${client.name} restaurada al 100% HP! (+200 XP para ${owner})`,
+      `${client.name} restaurada al 100% HP (+200 XP para ${owner})`,
     );
     setNowMs(Date.now());
   };
 
   /**
-   * Simulador táctico de desgaste de horas (0h=100% HP, 24h=75% HP, 48h=50% HP, 72h=25% HP Crítico)
-   */
-  const handleSetClientSimulatedHours = (clientId, hoursVal) => {
-    const newHp = Math.max(0, Math.min(100, Math.round(100 - (Number(hoursVal) / 24) * 25)));
-    updateRpgState((prev) => ({
-      ...prev,
-      manualHoursOverride: {
-        ...(prev.manualHoursOverride || {}),
-        [clientId]: hoursVal,
-      },
-      clientHpMap: {
-        ...(prev.clientHpMap || {}),
-        [clientId]: newHp,
-      },
-    }));
-  };
-
-  /**
-   * Botón de 'Check-in 8:30 AM +50 XP' (solo se habilita antes de las 9:00 AM o en modo simulación)
+   * Botón '7:30 AM Despegue (+50 XP)' habilitado entre 7:00 AM y 8:00 AM
    */
   const handleMorningCheckIn = (player) => {
     const currentHour = new Date(nowMs).getHours();
-    const isWindowOpen = currentHour < 9 || simulateBefore9AM;
+    const isWindowOpen = currentHour === 7;
     if (!isWindowOpen) {
-      showToast('🔒 El Check-in 8:30 AM solo está habilitado antes de las 9:00 AM');
+      showToast('7:30 AM Despegue habilitado entre 7:00 AM y 8:00 AM');
       return;
     }
 
@@ -1539,7 +1663,7 @@ export default function AdminDashboard() {
     const xpKey = player === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
 
     if (rpgState[lastKey] === todayDateStr) {
-      showToast(`✅ ${player} ya registró su Check-in 8:30 AM hoy`);
+      showToast(`${player} ya registró su 7:30 AM Despegue hoy`);
       return;
     }
 
@@ -1551,8 +1675,8 @@ export default function AdminDashboard() {
     }));
 
     playRpgSound('xp', rpgState.soundEnabled);
-    showFloatingXp(player, 50, '+50 XP · Check-in 8:30 AM');
-    showToast(`🌅 ¡Check-in 8:30 AM de ${player}! +50 XP y +1 día de racha temprana`);
+    showFloatingXp(player, 50, '+50 XP · 7:30 AM Despegue');
+    showToast(`7:30 AM Despegue de ${player}: +50 XP y +1 día de racha`);
   };
 
   /**
@@ -2157,9 +2281,9 @@ export default function AdminDashboard() {
     return s;
   }, [kevinMissionsData.top3, marcoMissionsData.top3]);
 
-  // 3. PERFILES DE JUGADOR (Nivel, Barra XP y Check-in 8:30 AM)
+  // 3. PERFILES DE JUGADOR (Nivel, Barra XP y 7:30 AM Despegue entre 7:00 AM y 8:00 AM)
   const currentLocalHour = new Date(nowMs).getHours();
-  const isBefore9AMWindow = currentLocalHour < 9 || simulateBefore9AM;
+  const isMorningDespegueWindow = currentLocalHour === 7;
 
   const kevinTotalXP = Number(rpgState.kevinBaseXP || 1200);
   const kevinLevel = Math.floor(kevinTotalXP / XP_PER_LEVEL) + 1;
@@ -2173,7 +2297,7 @@ export default function AdminDashboard() {
   const marcoLevelPercent = Math.round((marcoLevelXP / XP_PER_LEVEL) * 100);
   const marcoCheckedInToday = rpgState.marcoLastCheckIn === todayDateStr;
 
-  // 4. COFRE DE RECOMPENSA SEMANAL (BOSS FIGHT: X / 12 Reels Publicados esta semana)
+  // 4. META SEMANAL (X / 12 Reels Publicados esta semana)
   const weeklyPublishedCount = useMemo(() => {
     const sumByAccounts = accountHealthCards.reduce(
       (acc, card) => acc + card.publishedPieceCount,
@@ -2203,7 +2327,6 @@ export default function AdminDashboard() {
         (s) => normalizeAccountKey(s.client) === accountKey,
       );
 
-      // Tareas que no están en el Top 3 activo de hoy (o que coinciden con filtros del backlog)
       const filteredTasks = allClientTasks.filter((task) => {
         const assignee = normalizeAssignee(task.assignee);
         const matchesAssignee =
@@ -2372,48 +2495,37 @@ export default function AdminDashboard() {
       id: 'command',
       label: 'Command Center',
       icon: LayoutDashboard,
-      accent: 'text-zenda-cyan',
       badge: sprints.filter((s) => !s.completed).length,
     },
     {
       id: 'clients',
       label: 'Clientes 360°',
       icon: Building2,
-      accent: 'text-zenda-cyan',
       badge: zendaClients.length,
     },
     {
       id: 'pipeline',
       label: 'Pipeline de Contenido',
       icon: Film,
-      accent: 'text-purple-400',
       badge: contentList.length,
     },
     {
       id: 'calendar',
       label: 'Calendario & Rodajes',
       icon: CalendarIcon,
-      accent: 'text-cyan-400',
       badge: calendarEvents.filter((e) => !e.completed).length,
     },
     {
       id: 'finances',
       label: 'Finanzas & Caja',
       icon: Wallet,
-      accent: 'text-emerald-400',
       badge: finances.length,
     },
   ];
 
   return (
-    <div
-      className={`flex min-h-screen font-sans antialiased selection:bg-cyan-500 selection:text-white ${
-        activeTab === 'command'
-          ? 'bg-[#060911] text-slate-100'
-          : 'bg-[#F8FAFC] text-[#0F172A]'
-      }`}
-    >
-      {/* Explosión de Confeti Neón al cerrar las 3 Quests del Día o Desbloquear el Cofre 12/12 */}
+    <div className="flex min-h-screen bg-[#F8FAFC] font-sans text-[#0F172A] antialiased selection:bg-[#0066C5] selection:text-white">
+      {/* Confeti limpio al cerrar las 3 Quests del Día o Meta 12/12 */}
       <AnimatePresence>
         {celebrationBurst && (
           <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center overflow-hidden">
@@ -2434,7 +2546,6 @@ export default function AdminDashboard() {
                   width: p.size,
                   height: p.size,
                   backgroundColor: p.color,
-                  boxShadow: `0 0 12px ${p.color}`,
                 }}
                 className="absolute rounded-sm"
               />
@@ -2452,9 +2563,9 @@ export default function AdminDashboard() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.9 }}
             transition={SPRING_TRANSITION}
-            className="pointer-events-none fixed bottom-20 right-6 z-50 flex items-center gap-2.5 rounded-2xl border border-orange-500/60 bg-[#0B101D]/95 px-4 py-2.5 font-mono text-xs font-extrabold text-orange-400 shadow-[0_0_25px_rgba(249,115,22,0.45)]"
+            className="pointer-events-none fixed bottom-20 right-6 z-50 flex items-center gap-2 rounded-xl border border-[#0066C5]/30 bg-white px-3.5 py-2 font-mono text-xs font-bold text-[#0066C5] shadow-md"
           >
-            <Zap className="h-4 w-4 text-orange-400" />
+            <Zap className="h-3.5 w-3.5 text-[#0066C5]" />
             <span>
               [{floatingXpPopup.player}] {floatingXpPopup.label}
             </span>
@@ -2462,7 +2573,7 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Toast flotante animado en esquina inferior derecha */}
+      {/* Toast flotante en esquina inferior derecha */}
       <AnimatePresence>
         {toastMessage && (
           <motion.div
@@ -2471,56 +2582,47 @@ export default function AdminDashboard() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.94 }}
             transition={SPRING_TRANSITION}
-            className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl border border-cyan-500/40 bg-[#090D16] px-4 py-3 font-mono text-xs font-semibold text-white shadow-[0_0_24px_rgba(6,182,212,0.25)]"
+            className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border border-[#E2E8F0] bg-[#0F172A] px-4 py-2.5 font-mono text-xs font-medium text-white shadow-lg"
           >
-            <motion.span
-              initial={{ scale: 0.6 }}
-              animate={{ scale: [1, 1.25, 1] }}
-              transition={{ duration: 0.35 }}
-              className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/20 text-cyan-400"
-            >
-              <Check className="h-3.5 w-3.5" />
-            </motion.span>
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#10B981]/20 text-[#10B981]">
+              <Check className="h-3 w-3" />
+            </span>
             <span>{toastMessage}</span>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* ==================================================================== */}
-      {/* SIDEBAR TÁCTICO DARK (#07090F) CON DESLIZAMIENTO 'layoutId'          */}
+      {/* SIDEBAR MINIMALISTA (#09090B)                                        */}
       {/* ==================================================================== */}
-      <aside className="hidden w-64 flex-col border-r border-slate-800/80 bg-[#07090F] p-5 md:flex select-none">
-        {/* Marca & Status */}
+      <aside className="hidden w-60 flex-col border-r border-[#27272A] bg-[#09090B] p-4 md:flex select-none">
         <div className="flex items-center justify-between px-2">
-          <div className="flex items-center gap-2.5">
-            <img src="/isotipo-zenda.png" alt="Zenda" className="h-6 w-auto object-contain brightness-110" />
+          <div className="flex items-center gap-2">
+            <img src="/isotipo-zenda.png" alt="Zenda" className="h-5 w-auto object-contain brightness-110" />
             <span className="text-base font-bold tracking-tight text-white">zenda</span>
-            <span className="rounded border border-cyan-400/50 bg-cyan-500/15 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.25)]">
-              RPG·OS
+            <span className="rounded bg-[#0066C5] px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-white">
+              OS
             </span>
           </div>
-        </div>
 
-        <div className="mt-3 px-2">
-          <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/70 px-2.5 py-1.5 font-mono text-[10px] text-slate-400">
-            <div className="flex items-center gap-2 truncate">
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  rpgSyncOnline && isFirebaseConfigured
-                    ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]'
-                    : 'bg-amber-400'
-                }`}
-              />
-              <span className="truncate">
-                {rpgSyncOnline ? 'RPG CLOUD SYNC' : 'CACHE LOCAL'}
-              </span>
-            </div>
-            <span className="text-orange-400 font-bold">S-RANK</span>
-          </div>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold ${
+              rpgSyncOnline && isFirebaseConfigured
+                ? 'border-[#10B981]/40 bg-[#10B981]/15 text-[#10B981]'
+                : 'border-zinc-700 bg-zinc-800 text-zinc-400'
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                rpgSyncOnline && isFirebaseConfigured ? 'bg-[#10B981]' : 'bg-zinc-400'
+              }`}
+            />
+            {rpgSyncOnline && isFirebaseConfigured ? 'SYNC LIVE' : 'OFFLINE'}
+          </span>
         </div>
 
         {/* Navegación Lateral con layoutId */}
-        <nav className="mt-7 flex-1 space-y-1.5" aria-label="Secciones del Command Center">
+        <nav className="mt-6 flex-1 space-y-1" aria-label="Secciones de Zenda OS">
           {sidebarNavItems.map((item) => {
             const IconComponent = item.icon;
             const isActive = activeTab === item.id;
@@ -2528,28 +2630,27 @@ export default function AdminDashboard() {
               <motion.button
                 key={item.id}
                 type="button"
-                whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.97 }}
+                whileTap={{ scale: 0.98 }}
                 transition={SPRING_TRANSITION}
                 onClick={() => setActiveTab(item.id)}
-                className={`relative flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-mono font-medium tracking-wide transition-colors ${
+                className={`relative flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
                   isActive
                     ? 'text-white font-semibold'
-                    : 'text-slate-400 hover:text-white'
+                    : 'text-[#A1A1AA] hover:text-white'
                 }`}
               >
                 {isActive && (
                   <motion.div
                     layoutId="sidebarActiveNavIndicator"
                     transition={SPRING_TRANSITION}
-                    className="absolute inset-0 rounded-xl border border-cyan-500/35 bg-gradient-to-r from-cyan-500/15 to-orange-500/10 shadow-[0_0_15px_rgba(6,182,212,0.12)]"
+                    className="absolute inset-0 rounded-xl bg-white/10"
                   />
                 )}
-                <div className="relative z-10 flex items-center gap-3">
-                  <IconComponent className={`h-4 w-4 ${isActive ? item.accent : 'text-slate-500'}`} />
+                <div className="relative z-10 flex items-center gap-2.5">
+                  <IconComponent className={`h-4 w-4 ${isActive ? 'text-white' : 'text-[#A1A1AA]'}`} />
                   <span>{item.label}</span>
                 </div>
-                <span className="relative z-10 rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] font-mono text-slate-300">
+                <span className="relative z-10 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-mono text-zinc-300">
                   {item.badge}
                 </span>
               </motion.button>
@@ -2557,55 +2658,46 @@ export default function AdminDashboard() {
           })}
         </nav>
 
-        {/* Acceso rápido a las 4 cuentas oficiales con indicador de HP en el Sidebar */}
-        <div className="mb-4 border-t border-slate-800/80 pt-4">
-          <p className="px-2 font-mono text-[10px] uppercase tracking-wider text-slate-500">
-            HP de Cuentas ({accountHealthCards.length})
+        {/* Acceso rápido a las 4 cuentas oficiales con indicador de HP */}
+        <div className="mb-4 border-t border-[#27272A] pt-4">
+          <p className="px-2 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+            Cuentas ({accountHealthCards.length})
           </p>
           <div className="mt-2 space-y-1">
-            {accountHealthCards.map(({ client, hpPercent, statusKey }) => (
-              <motion.button
+            {accountHealthCards.map(({ client, hpPercent }) => (
+              <button
                 key={client.id}
                 type="button"
-                whileHover={{ x: 2 }}
-                whileTap={{ scale: 0.97 }}
-                transition={SPRING_TRANSITION}
                 onClick={() => handleOpenClient360(client.id, 'finances')}
                 className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
                   activeTab === 'clients' && selectedClient360Id === client.id
                     ? 'bg-white/10 text-white font-semibold'
-                    : 'text-slate-400 hover:bg-white/[0.04] hover:text-white'
+                    : 'text-[#A1A1AA] hover:bg-white/5 hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-2 truncate">
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/20"
-                    style={{ backgroundColor: client.brandColors?.[0] || '#06B6D4' }}
-                  />
-                  <span className="truncate">{client.name}</span>
-                </div>
+                <span className="truncate">{client.name}</span>
                 <span
-                  className={`font-mono text-[10px] font-bold ${
-                    statusKey === 'green'
-                      ? 'text-emerald-400'
-                      : statusKey === 'amber'
-                      ? 'text-amber-400'
-                      : 'text-rose-400'
+                  className={`font-mono text-[10px] font-semibold ${
+                    hpPercent < 30
+                      ? 'text-[#EF4444]'
+                      : hpPercent > 60
+                      ? 'text-[#10B981]'
+                      : 'text-zinc-300'
                   }`}
                 >
-                  {hpPercent}% HP
+                  {hpPercent}%
                 </span>
-              </motion.button>
+              </button>
             ))}
           </div>
         </div>
 
         {/* Footer Sidebar */}
-        <div className="space-y-3 border-t border-slate-800/80 pt-4">
+        <div className="space-y-2 border-t border-[#27272A] pt-3">
           <Link
             to="/"
             target="_blank"
-            className="flex items-center justify-between rounded-xl px-3 py-2 text-xs text-slate-400 transition-colors hover:bg-white/[0.04] hover:text-white"
+            className="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs text-[#A1A1AA] transition-colors hover:bg-white/5 hover:text-white"
           >
             <span className="flex items-center gap-2">
               <Globe className="h-3.5 w-3.5" />
@@ -2614,16 +2706,16 @@ export default function AdminDashboard() {
             <ExternalLink className="h-3 w-3" />
           </Link>
 
-          <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-xs">
+          <div className="flex items-center justify-between rounded-xl border border-[#27272A] bg-zinc-900/60 p-2.5 text-xs">
             <div className="truncate">
-              <p className="font-semibold text-white">{currentUser?.displayName || 'Party: Kevin & Marco'}</p>
-              <p className="truncate font-mono text-[11px] text-slate-400">{currentUser?.email || 'admin@wearezenda.com'}</p>
+              <p className="font-semibold text-white">{currentUser?.displayName || 'Kevin & Marco'}</p>
+              <p className="truncate font-mono text-[10px] text-[#A1A1AA]">{currentUser?.email || 'admin@wearezenda.com'}</p>
             </div>
             <button
               type="button"
               onClick={handleLogout}
               title="Cerrar Sesión"
-              className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-rose-400"
+              className="rounded-lg p-1.5 text-[#A1A1AA] transition-colors hover:bg-white/10 hover:text-white"
             >
               <LogOut className="h-4 w-4" />
             </button>
@@ -2632,216 +2724,132 @@ export default function AdminDashboard() {
       </aside>
 
       {/* ==================================================================== */}
-      {/* CONTENIDO PRINCIPAL + HEADER GLOBAL CON COFRE BOSS FIGHT SEMANAL     */}
+      {/* CONTENIDO PRINCIPAL + HEADER MINIMALISTA (#FFFFFF / #E2E8F0)         */}
       {/* ==================================================================== */}
       <div className="flex flex-1 flex-col overflow-y-auto">
-        {/* Header Global Táctico con Cofre de Recompensa Semanal (Boss Fight: X / 12 Reels) */}
-        <header className="sticky top-0 z-30 border-b border-slate-800/90 bg-[#080C15]/95 px-4 py-3 text-white shadow-lg backdrop-blur-md sm:px-6">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            {/* Izquierda: Título del Sistema + Menú Móvil */}
+        <header className="sticky top-0 z-30 border-b border-[#E2E8F0] bg-[#FFFFFF] px-4 py-3 text-[#0F172A] sm:px-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            {/* Izquierda: Título + SYNC LIVE */}
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <button
                   type="button"
                   onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                  className="rounded-lg border border-slate-800 bg-slate-900 p-2 text-slate-300 hover:text-white md:hidden"
+                  className="rounded-lg border border-[#E2E8F0] bg-white p-2 text-[#0F172A] md:hidden"
                 >
                   {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
                 </button>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="rounded border border-cyan-500/40 bg-cyan-500/15 px-1.5 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-widest text-cyan-400">
-                      SYSTEM HUD
-                    </span>
-                    <h1 className="font-mono text-xs font-bold uppercase tracking-wider text-white sm:text-sm">
-                      {activeTab === 'command' && 'Zenda Tactical RPG · Quests & HP de Cuentas'}
-                      {activeTab === 'clients' &&
-                        (selectedClient360
-                          ? `Clientes 360° · ${selectedClient360.name}`
-                          : 'Clientes 360° · Portafolio Oficial')}
-                      {activeTab === 'pipeline' && 'Pipeline Audiovisual · Reels & Contenido'}
-                      {activeTab === 'calendar' && 'Calendario Operativo · Rodajes & Cobros'}
-                      {activeTab === 'finances' && 'Finanzas & Caja Neta · Sincronización'}
-                    </h1>
-                  </div>
-                </div>
-              </div>
+                <div className="flex items-center gap-2.5">
+                  <h1 className="text-sm font-bold tracking-tight text-[#0F172A] sm:text-base">
+                    {activeTab === 'command' && 'Centro de Control'}
+                    {activeTab === 'clients' &&
+                      (selectedClient360
+                        ? `Clientes 360° · ${selectedClient360.name}`
+                        : 'Clientes 360°')}
+                    {activeTab === 'pipeline' && 'Pipeline de Contenido'}
+                    {activeTab === 'calendar' && 'Calendario & Rodajes'}
+                    {activeTab === 'finances' && 'Finanzas & Caja'}
+                  </h1>
 
-              {/* Controles rápidos móvil */}
-              <div className="flex items-center gap-1.5 xl:hidden">
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateRpgState((prev) => ({ ...prev, soundEnabled: !prev.soundEnabled }))
-                  }
-                  className={`rounded-lg border px-2 py-1 font-mono text-[10px] font-bold ${
-                    rpgState.soundEnabled
-                      ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300'
-                      : 'border-slate-800 bg-slate-900 text-slate-500'
-                  }`}
-                >
-                  {rpgState.soundEnabled ? '🔊 SFX' : '🔇 MUTE'}
-                </button>
-              </div>
-            </div>
-
-            {/* 4. COFRE DE RECOMPENSA SEMANAL (BOSS FIGHT: X / 12 Reels Publicados esta semana) */}
-            <div
-              className={`flex flex-1 flex-col gap-2 rounded-2xl border px-3.5 py-2.5 transition-all xl:max-w-2xl ${
-                isBossChestUnlocked
-                  ? 'border-amber-400/80 bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-cyan-500/20 shadow-[0_0_25px_rgba(245,158,11,0.3)]'
-                  : 'border-slate-800 bg-[#0D1322]/90'
-              }`}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <motion.span
-                    animate={
-                      isBossChestUnlocked
-                        ? { rotate: [0, -10, 10, -8, 8, 0], scale: [1, 1.18, 1] }
-                        : { scale: 1 }
-                    }
-                    transition={{ duration: 0.7 }}
-                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border font-mono text-xs ${
-                      isBossChestUnlocked
-                        ? 'border-amber-300 bg-amber-400 text-slate-950 shadow-[0_0_15px_rgba(251,191,36,0.7)]'
-                        : 'border-orange-500/40 bg-orange-500/15 text-orange-400'
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold ${
+                      rpgSyncOnline && isFirebaseConfigured
+                        ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
+                        : 'border-[#E2E8F0] bg-[#F8FAFC] text-slate-500'
                     }`}
                   >
-                    <Trophy className="h-4 w-4" />
-                  </motion.span>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[10px] font-extrabold uppercase tracking-wider text-orange-400">
-                        {isBossChestUnlocked
-                          ? '🔓 ¡BOSS DERROTADO! COFRE SEMANAL DESBLOQUEADO'
-                          : '⚔️ BOSS FIGHT · COFRE DE RECOMPENSA SEMANAL'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-[10px] text-slate-400">Recompensa:</span>
-                      <input
-                        type="text"
-                        value={rpgState.weeklyRewardText}
-                        onChange={(e) =>
-                          updateRpgState({ weeklyRewardText: e.target.value })
-                        }
-                        aria-label="Recompensa semanal acordada entre socios"
-                        className="w-44 sm:w-60 rounded border border-transparent bg-transparent px-1 py-0.5 font-mono text-[11px] font-bold text-amber-300 outline-none hover:border-slate-700 focus:border-cyan-400 focus:bg-slate-900"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <div className="text-right font-mono">
                     <span
-                      className={`text-sm font-extrabold ${
-                        isBossChestUnlocked ? 'text-amber-300' : 'text-cyan-400'
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        rpgSyncOnline && isFirebaseConfigured ? 'bg-[#10B981]' : 'bg-slate-400'
                       }`}
-                    >
-                      {weeklyPublishedCount} / {WEEKLY_AGENCY_GOAL}
-                    </span>
-                    <span className="ml-1 text-[10px] text-slate-400">Reels Sem.</span>
-                  </div>
-
-                  {/* Controles rápidos +/-1 Reel para sincronizar/probar el desbloqueo del Cofre 12/12 */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateRpgState((prev) => ({
-                          ...prev,
-                          manualBossReelsBonus: Number(prev.manualBossReelsBonus || 0) - 1,
-                        }))
-                      }
-                      className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-slate-900 font-mono text-xs font-bold text-slate-300 hover:border-slate-500 hover:text-white"
-                      title="Restar 1 reel al contador semanal"
-                    >
-                      -
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextVal = weeklyPublishedCount + 1;
-                        updateRpgState((prev) => ({
-                          ...prev,
-                          manualBossReelsBonus: Number(prev.manualBossReelsBonus || 0) + 1,
-                        }));
-                        if (nextVal >= WEEKLY_AGENCY_GOAL) {
-                          playRpgSound('fanfare', rpgState.soundEnabled);
-                          triggerCelebration();
-                          showToast(
-                            `🔓 ¡12/12 REELS! Cofre Semanal Desbloqueado: ${rpgState.weeklyRewardText}`,
-                          );
-                        } else {
-                          playRpgSound('xp', rpgState.soundEnabled);
-                        }
-                      }}
-                      className="flex h-6 w-6 items-center justify-center rounded-md border border-orange-500/40 bg-orange-500/20 font-mono text-xs font-bold text-orange-300 hover:bg-orange-500/30"
-                      title="Sumar +1 reel publicado al Cofre Semanal"
-                    >
-                      +
-                    </button>
-                  </div>
+                    />
+                    {rpgSyncOnline && isFirebaseConfigured ? 'SYNC LIVE' : 'OFFLINE'}
+                  </span>
                 </div>
               </div>
 
-              {/* Barra Global Animada del Cofre Boss Fight (X / 12) */}
-              <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-slate-950 p-0.5 ring-1 ring-slate-800">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${weeklyGoalPercent}%` }}
-                  transition={{ duration: 0.6, ease: 'easeOut' }}
-                  className={`h-full rounded-full ${
-                    isBossChestUnlocked
-                      ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-emerald-400 shadow-[0_0_12px_rgba(251,191,36,0.8)]'
-                      : 'bg-gradient-to-r from-orange-500 via-amber-400 to-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.5)]'
-                  }`}
-                />
+              <button
+                type="button"
+                onClick={() => setSprintModalOpen(true)}
+                className="inline-flex items-center gap-1 rounded-lg bg-[#0066C5] px-2.5 py-1.5 text-xs font-semibold text-white lg:hidden"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Quest</span>
+              </button>
+            </div>
+
+            {/* Centro: Meta Semanal 12/12 compacta */}
+            <div className="flex flex-1 items-center gap-3 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3.5 py-2 lg:max-w-xl">
+              <Trophy
+                className={`h-4 w-4 shrink-0 ${
+                  isBossChestUnlocked ? 'text-[#10B981]' : 'text-[#0066C5]'
+                }`}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="font-semibold text-[#0F172A]">Meta Semanal:</span>
+                    <input
+                      type="text"
+                      value={rpgState.weeklyRewardText}
+                      onChange={(e) =>
+                        updateRpgState({ weeklyRewardText: e.target.value })
+                      }
+                      aria-label="Recompensa semanal"
+                      className="w-40 sm:w-52 truncate rounded border border-transparent bg-transparent px-1 py-0.5 text-xs font-medium text-slate-600 outline-none hover:border-[#E2E8F0] focus:border-[#0066C5] focus:bg-white"
+                    />
+                  </div>
+                  <span
+                    className={`shrink-0 font-mono text-xs font-bold ${
+                      isBossChestUnlocked ? 'text-[#10B981]' : 'text-[#0066C5]'
+                    }`}
+                  >
+                    {weeklyPublishedCount}/{WEEKLY_AGENCY_GOAL}
+                  </span>
+                </div>
+                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[#E2E8F0]">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${weeklyGoalPercent}%` }}
+                    transition={{ duration: 0.45, ease: 'easeOut' }}
+                    className={`h-full rounded-full ${
+                      isBossChestUnlocked ? 'bg-[#10B981]' : 'bg-[#0066C5]'
+                    }`}
+                  />
+                </div>
               </div>
             </div>
 
-            {/* Derecha: Controles del Sistema */}
-            <div className="hidden items-center gap-2 xl:flex">
+            {/* Derecha: Acciones discretas */}
+            <div className="hidden items-center gap-2 lg:flex">
+              <button
+                type="button"
+                onClick={() => setSprintModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#0052A3]"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Nueva Quest</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() =>
                   updateRpgState((prev) => ({ ...prev, soundEnabled: !prev.soundEnabled }))
                 }
-                className={`rounded-xl border px-3 py-1.5 font-mono text-[11px] font-bold transition-colors ${
-                  rpgState.soundEnabled
-                    ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300'
-                    : 'border-slate-800 bg-slate-900 text-slate-500'
-                }`}
-                title="Activar/Desactivar efectos de sonido RPG"
+                className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 font-mono text-[11px] font-medium text-slate-600 hover:bg-[#F8FAFC] hover:text-[#0F172A]"
+                title="Sonido"
               >
-                {rpgState.soundEnabled ? '🔊 SFX ON' : '🔇 SFX OFF'}
+                {rpgState.soundEnabled ? 'SFX ON' : 'SFX OFF'}
               </button>
 
-              <motion.button
+              <button
                 type="button"
-                whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.96 }}
-                transition={SPRING_TRANSITION}
                 onClick={() => setResetModalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 py-1.5 font-mono text-[11px] font-medium text-slate-300 transition-colors hover:border-orange-500/50 hover:text-orange-300"
+                className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-[#F8FAFC] hover:text-[#0F172A]"
+                title="Reiniciar Base"
               >
-                <RotateCcw className="h-3 w-3" />
-                <span>Reiniciar Base</span>
-              </motion.button>
-
-              <motion.button
-                type="button"
-                whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.96 }}
-                transition={SPRING_TRANSITION}
-                onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 py-1.5 font-mono text-[11px] font-semibold text-slate-300 hover:border-rose-500/50 hover:text-rose-400"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                <span>Salir</span>
-              </motion.button>
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
         </header>
@@ -2853,9 +2861,9 @@ export default function AdminDashboard() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden border-b border-slate-800 bg-[#07090F] p-4 text-white md:hidden"
+              className="overflow-hidden border-b border-[#E2E8F0] bg-white p-3 text-[#0F172A] md:hidden"
             >
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 {sidebarNavItems.map((item) => (
                   <button
                     key={item.id}
@@ -2864,12 +2872,16 @@ export default function AdminDashboard() {
                       setActiveTab(item.id);
                       setMobileMenuOpen(false);
                     }}
-                    className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left font-mono text-xs font-semibold uppercase ${
-                      activeTab === item.id ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400'
+                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-xs font-semibold ${
+                      activeTab === item.id
+                        ? 'bg-[#0066C5]/10 text-[#0066C5]'
+                        : 'text-slate-600'
                     }`}
                   >
                     <span>{item.label}</span>
-                    <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px]">{item.badge}</span>
+                    <span className="rounded-full bg-[#F8FAFC] px-2 py-0.5 font-mono text-[10px]">
+                      {item.badge}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -2877,323 +2889,125 @@ export default function AdminDashboard() {
           )}
         </AnimatePresence>
 
-        {/* Tab Content con transiciones suaves AnimatePresence */}
-        <main className="flex-1 p-4 pb-24 sm:p-6 md:p-7 md:pb-10">
+        {/* Tab Content */}
+        <main className="flex-1 p-4 pb-24 sm:p-6 md:pb-10">
           <AnimatePresence mode="wait">
             {/* ================================================================ */}
-            {/* TABLERO OPERATIVO RPG / VIDEOJUEGO TÁCTICO (SOLO LEVELING+LINEAR) */}
+            {/* VISTA PRINCIPAL: DASHBOARD RPG MINIMALISTA                       */}
             {/* ================================================================ */}
             {activeTab === 'command' && (
               <motion.div
                 key="tab-command-rpg"
-                initial={{ opacity: 0, scale: 0.99, y: 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.99, y: -8 }}
-                transition={{ duration: 0.22 }}
-                className="space-y-7"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.18 }}
+                className="space-y-6"
               >
                 {/* ============================================================ */}
-                {/* 1. BARRA DE SALUD (HP) DE LOS 4 CLIENTES (ARRIBA)            */}
+                {/* 1. FILA SUPERIOR: 4 CUENTAS COMPACTAS                        */}
+                {/* (Nombre, barra fina de HP %, horas sin publicar y + Publicar) */}
                 {/* ============================================================ */}
-                <section aria-label="Barra de Salud HP de los 4 Clientes" className="space-y-3.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-lg border border-cyan-500/40 bg-cyan-500/15 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.3)]">
-                        <Activity className="h-3.5 w-3.5" />
-                      </span>
-                      <div>
-                        <h2 className="font-mono text-xs font-extrabold uppercase tracking-wider text-white sm:text-sm">
-                          1. Barra de Salud (HP) de las 4 Cuentas Oficiales
-                        </h2>
-                        <p className="font-mono text-[11px] text-slate-400">
-                          100% HP al publicar · Pierde <strong className="text-orange-400">-25% HP por cada 24h</strong> sin publicación nueva
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 font-mono text-[10px]">
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 font-bold text-emerald-300">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                        &gt; 60% HP · Óptimo
-                      </span>
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 font-bold text-amber-300">
-                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-                        30–60% HP · Desgaste
-                      </span>
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/50 bg-rose-500/15 px-2.5 py-0.5 font-bold text-rose-300">
-                        <span className="h-1.5 w-1.5 animate-ping rounded-full bg-rose-500" />
-                        &lt; 30% HP · Cuenta en Peligro
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <section aria-label="Estado de Cuentas">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     {accountHealthCards.map((item) => {
                       const {
                         client,
                         hoursSincePublish,
                         hpPercent,
                         statusKey,
-                        statusLabel,
-                        publishedPieceCount,
-                        weeklyGoal,
                         isHealedFlashing,
                       } = item;
 
-                      const isGreen = statusKey === 'green';
-                      const isAmber = statusKey === 'amber';
-                      const isCriticalRed = statusKey === 'red';
+                      const isOptimal = statusKey === 'green';
+                      const isCritical = statusKey === 'red';
 
-                      const cardStyleClass = isHealedFlashing
-                        ? 'border-emerald-400 bg-[#0D1F1D] shadow-[0_0_30px_rgba(16,185,129,0.45)]'
-                        : isGreen
-                        ? 'border-emerald-500/35 bg-[#0C1220] hover:border-emerald-400/60 shadow-[0_0_18px_rgba(16,185,129,0.08)]'
-                        : isAmber
-                        ? 'border-amber-500/45 bg-[#121320] hover:border-amber-400/70 shadow-[0_0_18px_rgba(245,158,11,0.12)]'
-                        : 'border-rose-500/70 bg-[#190D16] hover:border-rose-400 shadow-[0_0_24px_rgba(244,63,94,0.28)]';
-
-                      const hpBarColorClass = isGreen
-                        ? 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-cyan-400 shadow-[0_0_12px_rgba(16,185,129,0.65)]'
-                        : isAmber
-                        ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-yellow-400 shadow-[0_0_12px_rgba(245,158,11,0.6)]'
-                        : 'bg-gradient-to-r from-rose-600 via-red-500 to-orange-500 shadow-[0_0_14px_rgba(244,63,94,0.8)]';
+                      const barColor = isOptimal
+                        ? 'bg-[#10B981]'
+                        : isCritical
+                        ? 'bg-[#EF4444]'
+                        : 'bg-[#0066C5]';
 
                       return (
-                        <motion.div
+                        <div
                           key={client.id}
-                          whileHover={{ y: -3 }}
-                          transition={SPRING_TRANSITION}
-                          className={`relative flex flex-col justify-between overflow-hidden rounded-2xl border p-4 transition-all ${cardStyleClass}`}
+                          className={`flex flex-col justify-between rounded-xl border bg-[#FFFFFF] p-3.5 shadow-sm transition-colors ${
+                            isHealedFlashing
+                              ? 'border-[#10B981]'
+                              : 'border-[#E2E8F0]'
+                          }`}
                         >
-                          {/* Efecto visual de Curación 100% HP al publicar */}
-                          <AnimatePresence>
-                            {isHealedFlashing && (
-                              <motion.div
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0 }}
-                                className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-emerald-500/20 backdrop-blur-[1px]"
-                              >
-                                <motion.div
-                                  initial={{ y: 12, opacity: 0 }}
-                                  animate={{ y: -6, opacity: 1 }}
-                                  exit={{ opacity: 0 }}
-                                  className="rounded-xl border border-emerald-300 bg-emerald-950/95 px-3.5 py-2 font-mono text-xs font-extrabold text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.8)]"
-                                >
-                                  💚 +100% HP RESTAURADO
-                                </motion.div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
+                          {/* Fila 1: Nombre + HP (%) */}
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenClient360(client.id, 'scripts')}
+                              className="truncate text-left text-sm font-bold text-[#0F172A] hover:text-[#0066C5]"
+                            >
+                              {client.name}
+                            </button>
 
-                          <div>
-                            {/* Cabecera del Cliente + Alerta Crítica */}
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <span
-                                  className="h-3.5 w-3.5 shrink-0 rounded-full ring-2 ring-white/20"
-                                  style={{ backgroundColor: client.brandColors?.[0] || '#06B6D4' }}
-                                />
-                                <div className="truncate">
-                                  <h3 className="truncate text-sm font-extrabold tracking-tight text-white">
-                                    {client.name}
-                                  </h3>
-                                  <p className="truncate font-mono text-[10px] text-slate-400">
-                                    {client.category}
-                                  </p>
-                                </div>
-                              </div>
-
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isCritical && (
+                                <span className="rounded bg-[#EF4444]/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#EF4444]">
+                                  Alerta
+                                </span>
+                              )}
                               <span
-                                className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase ${
-                                  isGreen
-                                    ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                                    : isAmber
-                                    ? 'border-amber-500/40 bg-amber-500/15 text-amber-300'
-                                    : 'animate-pulse border-rose-500 bg-rose-500/25 text-rose-200'
+                                className={`font-mono text-xs font-bold ${
+                                  isCritical
+                                    ? 'text-[#EF4444]'
+                                    : isOptimal
+                                    ? 'text-[#10B981]'
+                                    : 'text-[#0F172A]'
                                 }`}
                               >
-                                {isCriticalRed && <span>⚠️</span>}
-                                <span>{statusLabel}</span>
+                                {hpPercent}% HP
                               </span>
                             </div>
-
-                            {/* Medidor de HP y Tiempo sin Publicar */}
-                            <div className="mt-4 rounded-xl border border-slate-800/90 bg-[#070A12] p-3">
-                              <div className="flex items-baseline justify-between">
-                                <div className="flex items-baseline gap-1.5">
-                                  <span className="font-mono text-[10px] font-bold uppercase text-slate-400">
-                                    HP
-                                  </span>
-                                  <span
-                                    className={`font-mono text-2xl font-black tracking-tight ${
-                                      isGreen
-                                        ? 'text-emerald-400'
-                                        : isAmber
-                                        ? 'text-amber-400'
-                                        : 'text-rose-400'
-                                    }`}
-                                  >
-                                    {hpPercent}%
-                                  </span>
-                                  <span className="font-mono text-[10px] text-slate-500">
-                                    / 100%
-                                  </span>
-                                </div>
-
-                                <span className="font-mono text-[11px] font-semibold text-slate-300">
-                                  ⏱ {hoursSincePublish}h sin pub.
-                                </span>
-                              </div>
-
-                              {/* Barra de HP Animada */}
-                              <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-slate-900 p-0.5 ring-1 ring-slate-800">
-                                <motion.div
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${hpPercent}%` }}
-                                  transition={{ duration: 0.55, ease: 'easeOut' }}
-                                  className={`h-full rounded-full ${hpBarColorClass}`}
-                                />
-                              </div>
-
-                              <div className="mt-2 flex items-center justify-between font-mono text-[10px] text-slate-400">
-                                <span>
-                                  Reels semana:{' '}
-                                  <strong className="text-white">
-                                    {publishedPieceCount}/{weeklyGoal}
-                                  </strong>
-                                </span>
-                                <div className="flex items-center gap-1" title="Simular horas transcurridas para probar desgaste de HP">
-                                  {[
-                                    { h: 0, label: '0h' },
-                                    { h: 24, label: '24h' },
-                                    { h: 48, label: '48h' },
-                                    { h: 76, label: '76h' },
-                                  ].map((preset) => (
-                                    <button
-                                      key={preset.h}
-                                      type="button"
-                                      onClick={() =>
-                                        handleSetClientSimulatedHours(client.id, preset.h)
-                                      }
-                                      className={`rounded px-1.5 py-0.5 text-[9px] font-bold transition-colors ${
-                                        hoursSincePublish === preset.h
-                                          ? 'bg-cyan-500/30 text-cyan-200 ring-1 ring-cyan-400/50'
-                                          : 'bg-slate-900 text-slate-500 hover:text-slate-300'
-                                      }`}
-                                    >
-                                      {preset.label}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
                           </div>
 
-                          {/* Botón de 1 Clic: Publicar pieza -> Restaura HP al 100% con efecto visual */}
-                          <div className="mt-3.5 flex items-center gap-2">
-                            <motion.button
+                          {/* Fila 2: Barra fina de HP */}
+                          <div className="my-2.5 h-1.5 w-full overflow-hidden rounded-full bg-[#F8FAFC] ring-1 ring-[#E2E8F0]">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${hpPercent}%` }}
+                              transition={{ duration: 0.4, ease: 'easeOut' }}
+                              className={`h-full rounded-full ${barColor}`}
+                            />
+                          </div>
+
+                          {/* Fila 3: Horas sin publicar + Botón limpio + Publicar */}
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-[11px] text-slate-500">
+                              {hoursSincePublish}h sin publicar
+                            </span>
+
+                            <button
                               type="button"
-                              whileHover={{ y: -1 }}
-                              whileTap={{ scale: 0.95 }}
-                              transition={SPRING_TRANSITION}
                               onClick={() => handleQuickMarkAccountPublishedNow(client)}
-                              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 py-2 font-mono text-[11px] font-extrabold transition-all ${
-                                isCriticalRed
-                                  ? 'border-rose-400 bg-gradient-to-r from-rose-600 to-orange-600 text-white shadow-[0_0_15px_rgba(244,63,94,0.45)] hover:brightness-110'
-                                  : 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500 hover:text-slate-950'
-                              }`}
+                              className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-xs font-semibold text-[#0F172A] transition-colors hover:border-[#0066C5] hover:bg-[#0066C5] hover:text-white"
                             >
-                              <Zap className="h-3.5 w-3.5" />
-                              <span>Publicar Reel (+100% HP)</span>
-                            </motion.button>
-
-                            <motion.button
-                              type="button"
-                              whileTap={{ scale: 0.95 }}
-                              transition={SPRING_TRANSITION}
-                              onClick={() => handleOpenClient360(client.id, 'scripts')}
-                              className="rounded-xl border border-slate-800 bg-slate-900/90 px-2.5 py-2 font-mono text-[11px] font-bold text-slate-300 hover:border-slate-600 hover:text-white"
-                              title="Abrir Taller de Guiones y Vista 360°"
-                            >
-                              360°
-                            </motion.button>
+                              <Plus className="h-3 w-3" />
+                              <span>Publicar</span>
+                            </button>
                           </div>
-                        </motion.div>
+                        </div>
                       );
                     })}
                   </div>
                 </section>
 
                 {/* ============================================================ */}
-                {/* 2. PERFILES DE JUGADOR & 3. TABLERO DE 'QUESTS DEL DÍA'      */}
+                {/* 2. PERFILES (KEVIN VS MARCO) & QUESTS DEL DÍA (MÁX 3)        */}
                 {/* ============================================================ */}
-                <section aria-label="Perfiles de Jugador y Quests del Día" className="space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-lg border border-orange-500/40 bg-orange-500/15 text-orange-400 shadow-[0_0_12px_rgba(249,115,22,0.3)]">
-                        <Flame className="h-3.5 w-3.5" />
-                      </span>
-                      <div>
-                        <h2 className="font-mono text-xs font-extrabold uppercase tracking-wider text-white sm:text-sm">
-                          2 &amp; 3. Perfiles de Jugador (Kevin vs Marco) &amp; Tablero de Quests del Día
-                        </h2>
-                        <p className="font-mono text-[11px] text-slate-400">
-                          Check-in 8:30 AM (+50 XP antes de las 9:00 AM) · Máximo 3 Quests diarias por jugador (Pendiente → En Curso → Completado)
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Controles del Sistema: Simulador < 9:00 AM para probar el Check-in 8:30 AM + Modal */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSimulateBefore9AM((prev) => !prev)}
-                        className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 font-mono text-[10px] font-bold transition-all ${
-                          isBefore9AMWindow
-                            ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
-                            : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700 hover:text-white'
-                        }`}
-                        title="Permite probar el botón Check-in 8:30 AM (+50 XP) aunque sean más de las 9:00 AM"
-                      >
-                        <Clock className="h-3.5 w-3.5" />
-                        <span>
-                          {currentLocalHour < 9
-                            ? 'Ventana < 9:00 AM Activa'
-                            : simulateBefore9AM
-                            ? '🔓 Simulación < 9:00 AM: ON'
-                            : `🔒 Hora actual ${currentLocalHour}:00 (Simular <9AM)`}
-                        </span>
-                      </button>
-
-                      <motion.button
-                        type="button"
-                        whileHover={{ y: -1 }}
-                        whileTap={{ scale: 0.96 }}
-                        transition={SPRING_TRANSITION}
-                        onClick={() => setSprintModalOpen(true)}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-3 py-1.5 font-mono text-[11px] font-bold text-cyan-300 hover:bg-cyan-500 hover:text-slate-950"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        + Quest Detallada
-                      </motion.button>
-                    </div>
-                  </div>
-
-                  {/* Dos Paneles Lado a Lado: Kevin (Arquitecto IA) vs Marco (Director de Campo) */}
-                  <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <section aria-label="Jugadores y Quests del Día">
+                  <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                     {[
                       {
                         player: 'Kevin',
                         classTitle: 'Kevin · Arquitecto IA',
-                        rankTag: 'SHADOW AI ARCHITECT',
                         avatarText: 'KV',
-                        themeAccent: 'cyan',
-                        panelBorder: 'border-cyan-500/35 bg-[#0A101D]',
-                        avatarStyle:
-                          'border-cyan-400 bg-gradient-to-br from-cyan-500 to-blue-700 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.5)]',
-                        xpBarStyle:
-                          'bg-gradient-to-r from-cyan-500 via-sky-400 to-emerald-400 shadow-[0_0_12px_rgba(6,182,212,0.65)]',
                         level: kevinLevel,
                         totalXP: kevinTotalXP,
                         levelXP: kevinLevelXP,
@@ -3207,14 +3021,7 @@ export default function AdminDashboard() {
                       {
                         player: 'Marco',
                         classTitle: 'Marco · Director de Campo',
-                        rankTag: 'VANGUARD FIELD DIRECTOR',
                         avatarText: 'MC',
-                        themeAccent: 'orange',
-                        panelBorder: 'border-orange-500/35 bg-[#100E1A]',
-                        avatarStyle:
-                          'border-orange-400 bg-gradient-to-br from-orange-500 to-amber-600 text-slate-950 shadow-[0_0_20px_rgba(249,115,22,0.5)]',
-                        xpBarStyle:
-                          'bg-gradient-to-r from-orange-500 via-amber-400 to-yellow-300 shadow-[0_0_12px_rgba(249,115,22,0.65)]',
                         level: marcoLevel,
                         totalXP: marcoTotalXP,
                         levelXP: marcoLevelXP,
@@ -3232,356 +3039,245 @@ export default function AdminDashboard() {
                       return (
                         <div
                           key={hunter.player}
-                          className={`flex flex-col justify-between rounded-2xl border p-4 sm:p-5 shadow-xl ${hunter.panelBorder}`}
+                          className="flex flex-col justify-between rounded-2xl border border-[#E2E8F0] bg-[#FFFFFF] p-4 sm:p-5 shadow-sm"
                         >
                           <div>
-                            {/* ================================================ */}
-                            {/* PANEL SUPERIOR: PERFIL DE JUGADOR RPG            */}
-                            {/* ================================================ */}
-                            <div className="rounded-2xl border border-slate-800/90 bg-[#070A12]/90 p-4">
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div className="flex items-center gap-3.5">
-                                  {/* Avatar Táctico con Nivel */}
-                                  <div className="relative">
-                                    <div
-                                      className={`flex h-14 w-14 items-center justify-center rounded-2xl border-2 font-mono text-lg font-black ${hunter.avatarStyle}`}
-                                    >
-                                      {hunter.avatarText}
-                                    </div>
-                                    <span className="absolute -bottom-1.5 -right-1.5 rounded-lg border border-slate-700 bg-slate-950 px-1.5 py-0.5 font-mono text-[10px] font-black text-white shadow">
+                            {/* Perfil compacto */}
+                            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E2E8F0] pb-3.5">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0066C5] font-mono text-sm font-bold text-white">
+                                  {hunter.avatarText}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h2 className="text-base font-bold text-[#0F172A]">
+                                      {hunter.classTitle}
+                                    </h2>
+                                    <span className="rounded-md bg-[#0066C5]/10 px-2 py-0.5 font-mono text-[11px] font-bold text-[#0066C5]">
                                       LVL {hunter.level}
                                     </span>
                                   </div>
-
-                                  <div>
-                                    <span
-                                      className={`inline-block rounded border px-1.5 py-0.5 font-mono text-[9px] font-extrabold uppercase tracking-widest ${
-                                        hunter.themeAccent === 'cyan'
-                                          ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300'
-                                          : 'border-orange-500/40 bg-orange-500/15 text-orange-300'
-                                      }`}
-                                    >
-                                      {hunter.rankTag}
-                                    </span>
-                                    <h3 className="mt-1 text-lg font-extrabold tracking-tight text-white">
-                                      {hunter.classTitle}
-                                    </h3>
-                                    <p className="font-mono text-[11px] text-slate-400">
-                                      XP Total:{' '}
-                                      <strong className="text-white">
-                                        {hunter.totalXP.toLocaleString()} XP
-                                      </strong>
-                                    </p>
-                                  </div>
-                                </div>
-
-                                {/* Racha de Días Despertando Temprano */}
-                                <div className="flex flex-col items-end">
-                                  <div className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-1 font-mono text-xs font-extrabold text-amber-300">
-                                    <Flame className="h-4 w-4 text-orange-400" />
-                                    <span>{hunter.earlyStreak} días 8:30 AM</span>
-                                  </div>
-                                  <span className="mt-1 font-mono text-[10px] text-slate-500">
-                                    Racha Despertando Temprano
-                                  </span>
+                                  <p className="font-mono text-xs text-slate-500">
+                                    {hunter.totalXP.toLocaleString()} XP · Racha 7:30 AM:{' '}
+                                    <strong className="text-[#0F172A]">{hunter.earlyStreak}d</strong>
+                                  </p>
                                 </div>
                               </div>
 
-                              {/* Barra de XP del Jugador */}
-                              <div className="mt-4 space-y-1.5">
-                                <div className="flex items-center justify-between font-mono text-[11px]">
-                                  <span className="text-slate-400">
-                                    Progreso a <strong className="text-white">LVL {hunter.level + 1}</strong>
-                                  </span>
-                                  <span
-                                    className={`font-bold ${
-                                      hunter.themeAccent === 'cyan'
-                                        ? 'text-cyan-300'
-                                        : 'text-orange-300'
-                                    }`}
-                                  >
-                                    {hunter.levelXP} / {XP_PER_LEVEL} XP ({hunter.levelPercent}%)
-                                  </span>
-                                </div>
-                                <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-900 p-0.5 ring-1 ring-slate-800">
-                                  <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${hunter.levelPercent}%` }}
-                                    transition={{ duration: 0.55, ease: 'easeOut' }}
-                                    className={`h-full rounded-full ${hunter.xpBarStyle}`}
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Botón de 'Check-in 8:30 AM +50 XP' (Solo habilitado antes de las 9:00 AM) */}
-                              <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/80 pt-3">
-                                <span className="font-mono text-[10px] text-slate-400">
-                                  🌅 Bono Matutino (Antes de 9:00 AM):
+                              {/* Botón 7:30 AM Despegue (habilitado entre 7:00 AM y 8:00 AM) */}
+                              <button
+                                type="button"
+                                disabled={!isMorningDespegueWindow || hunter.checkedInToday}
+                                onClick={() => handleMorningCheckIn(hunter.player)}
+                                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 font-mono text-xs font-semibold transition-colors ${
+                                  hunter.checkedInToday
+                                    ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
+                                    : isMorningDespegueWindow
+                                    ? 'border-[#0066C5] bg-[#0066C5] text-white hover:bg-[#0052A3]'
+                                    : 'cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] text-slate-400'
+                                }`}
+                                title="Habilitado entre 7:00 AM y 8:00 AM"
+                              >
+                                <Clock className="h-3.5 w-3.5" />
+                                <span>
+                                  {hunter.checkedInToday
+                                    ? '7:30 AM Despegue ✓'
+                                    : '7:30 AM Despegue (+50 XP)'}
                                 </span>
+                              </button>
+                            </div>
 
-                                <motion.button
-                                  type="button"
-                                  disabled={!isBefore9AMWindow || hunter.checkedInToday}
-                                  whileHover={
-                                    isBefore9AMWindow && !hunter.checkedInToday ? { y: -1 } : {}
-                                  }
-                                  whileTap={
-                                    isBefore9AMWindow && !hunter.checkedInToday
-                                      ? { scale: 0.95 }
-                                      : {}
-                                  }
-                                  onClick={() => handleMorningCheckIn(hunter.player)}
-                                  className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 font-mono text-[11px] font-extrabold transition-all ${
-                                    hunter.checkedInToday
-                                      ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300'
-                                      : isBefore9AMWindow
-                                      ? 'border-amber-400 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.45)] hover:brightness-110'
-                                      : 'cursor-not-allowed border-slate-800 bg-slate-900/70 text-slate-500'
-                                  }`}
-                                >
-                                  <Zap className="h-3.5 w-3.5" />
-                                  <span>
-                                    {hunter.checkedInToday
-                                      ? '✓ Check-in 8:30 AM Reclamado (+50 XP)'
-                                      : isBefore9AMWindow
-                                      ? 'Check-in 8:30 AM (+50 XP)'
-                                      : '🔒 Check-in 8:30 AM +50 XP (< 9:00 AM)'}
-                                  </span>
-                                </motion.button>
+                            {/* Barra fina de XP */}
+                            <div className="mt-3">
+                              <div className="flex items-center justify-between font-mono text-[11px] text-slate-500">
+                                <span>Progreso LVL {hunter.level + 1}</span>
+                                <span className="font-semibold text-[#0F172A]">
+                                  {hunter.levelXP} / {XP_PER_LEVEL} XP
+                                </span>
+                              </div>
+                              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[#F8FAFC] ring-1 ring-[#E2E8F0]">
+                                <motion.div
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${hunter.levelPercent}%` }}
+                                  transition={{ duration: 0.45, ease: 'easeOut' }}
+                                  className="h-full rounded-full bg-[#0066C5]"
+                                />
                               </div>
                             </div>
 
-                            {/* ================================================ */}
-                            {/* 3. TABLERO DE 'QUESTS DEL DÍA' (MÁX 3 VISIBLES)  */}
-                            {/* ================================================ */}
-                            <div className="mt-4">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono text-xs font-extrabold uppercase tracking-wider text-white">
-                                    ⚔️ Quests del Día · {hunter.player}
-                                  </span>
-                                  <span className="rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-300">
-                                    Máx 3 visibles ({hunter.missionsData.top3.length}/3)
-                                  </span>
-                                </div>
+                            {/* Cabecera Quests del Día */}
+                            <div className="mt-4 flex items-center justify-between">
+                              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                                Quests de Hoy ({hunter.missionsData.top3.length}/3)
+                              </span>
+                              <span
+                                className={`rounded-full px-2 py-0.5 font-mono text-[11px] font-bold ${
+                                  all3Cleared
+                                    ? 'bg-[#10B981]/10 text-[#10B981]'
+                                    : 'bg-[#F8FAFC] text-slate-600'
+                                }`}
+                              >
+                                {doneToday}/3 completadas
+                              </span>
+                            </div>
 
-                                <span
-                                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-mono text-[11px] font-extrabold ${
-                                    all3Cleared
-                                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.35)]'
-                                      : 'border-slate-700 bg-slate-900 text-slate-300'
-                                  }`}
+                            {/* Formulario rápido para añadir Quest */}
+                            <form
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                if (!hunter.quickForm.title.trim()) return;
+                                handleQuickCreateMissionInline({
+                                  title: hunter.quickForm.title,
+                                  client: hunter.quickForm.client,
+                                  assignee: hunter.player,
+                                  questDifficulty: hunter.quickForm.questDifficulty,
+                                  priority: 'Urgente',
+                                  deadline: todayDateStr,
+                                  isTodayPinned: true,
+                                });
+                                hunter.setQuickForm({ ...hunter.quickForm, title: '' });
+                              }}
+                              className="mt-2.5 flex flex-col gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-2.5"
+                            >
+                              <div className="grid grid-cols-2 gap-2">
+                                <select
+                                  value={hunter.quickForm.client}
+                                  onChange={(e) =>
+                                    hunter.setQuickForm({
+                                      ...hunter.quickForm,
+                                      client: e.target.value,
+                                    })
+                                  }
+                                  className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5]"
                                 >
-                                  {all3Cleared && <Check className="h-3.5 w-3.5 text-emerald-400" />}
-                                  {doneToday}/3 Completadas
-                                </span>
+                                  {zendaClients.map((c) => (
+                                    <option key={c.id} value={c.name}>
+                                      {c.name}
+                                    </option>
+                                  ))}
+                                </select>
+
+                                <select
+                                  value={hunter.quickForm.questDifficulty}
+                                  onChange={(e) =>
+                                    hunter.setQuickForm({
+                                      ...hunter.quickForm,
+                                      questDifficulty: e.target.value,
+                                    })
+                                  }
+                                  className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 font-mono text-xs font-semibold text-[#0066C5] outline-none focus:border-[#0066C5]"
+                                >
+                                  {QUEST_DIFFICULTIES.map((d) => (
+                                    <option key={d.id} value={d.id}>
+                                      {d.badgeLabel}
+                                    </option>
+                                  ))}
+                                </select>
                               </div>
 
-                              {/* Creador Rápido de Quest con Selector de Dificultad (+100 / +150 / +200 XP) */}
-                              <form
-                                onSubmit={(e) => {
-                                  e.preventDefault();
-                                  if (!hunter.quickForm.title.trim()) return;
-                                  handleQuickCreateMissionInline({
-                                    title: hunter.quickForm.title,
-                                    client: hunter.quickForm.client,
-                                    assignee: hunter.player,
-                                    questDifficulty: hunter.quickForm.questDifficulty,
-                                    priority: 'Urgente',
-                                    deadline: todayDateStr,
-                                    isTodayPinned: true,
-                                  });
-                                  hunter.setQuickForm({ ...hunter.quickForm, title: '' });
-                                }}
-                                className="mt-3 flex flex-col gap-2 rounded-xl border border-slate-800 bg-[#070A12] p-2.5"
-                              >
-                                <div className="grid grid-cols-2 gap-2">
-                                  <select
-                                    value={hunter.quickForm.client}
-                                    onChange={(e) =>
-                                      hunter.setQuickForm({
-                                        ...hunter.quickForm,
-                                        client: e.target.value,
-                                      })
-                                    }
-                                    className="rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 font-mono text-[11px] font-bold text-white outline-none focus:border-cyan-400"
-                                  >
-                                    {zendaClients.map((c) => (
-                                      <option key={c.id} value={c.name}>
-                                        {c.name}
-                                      </option>
-                                    ))}
-                                  </select>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={hunter.quickForm.title}
+                                  onChange={(e) =>
+                                    hunter.setQuickForm({
+                                      ...hunter.quickForm,
+                                      title: e.target.value,
+                                    })
+                                  }
+                                  placeholder={`Nueva quest para ${hunter.player}...`}
+                                  className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5]"
+                                />
+                                <button
+                                  type="submit"
+                                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#0052A3]"
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                  <span>Crear</span>
+                                </button>
+                              </div>
+                            </form>
 
-                                  <select
-                                    value={hunter.quickForm.questDifficulty}
-                                    onChange={(e) =>
-                                      hunter.setQuickForm({
-                                        ...hunter.quickForm,
-                                        questDifficulty: e.target.value,
-                                      })
-                                    }
-                                    className="rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 font-mono text-[11px] font-bold text-orange-300 outline-none focus:border-orange-400"
-                                  >
-                                    {QUEST_DIFFICULTIES.map((d) => (
-                                      <option key={d.id} value={d.id}>
-                                        {d.badgeLabel}
-                                      </option>
-                                    ))}
-                                  </select>
+                            {/* Lista de máximo 3 Quests diarias */}
+                            <div className="mt-3 space-y-2.5">
+                              {hunter.missionsData.top3.length === 0 ? (
+                                <div className="rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] p-5 text-center text-xs text-slate-400">
+                                  Sin quests activas para hoy.
                                 </div>
+                              ) : (
+                                hunter.missionsData.top3.map((quest) => {
+                                  const rpgStatus = getQuestRpgStatus(quest);
+                                  const diffInfo = getQuestDifficultyInfo(quest);
+                                  const isPending = rpgStatus === 'Pendiente';
+                                  const isInCourse = rpgStatus === 'En Curso';
+                                  const isCompleted = rpgStatus === 'Completado';
 
-                                <div className="flex gap-2">
-                                  <input
-                                    type="text"
-                                    value={hunter.quickForm.title}
-                                    onChange={(e) =>
-                                      hunter.setQuickForm({
-                                        ...hunter.quickForm,
-                                        title: e.target.value,
-                                      })
-                                    }
-                                    placeholder={`+ Nueva Quest para ${hunter.player}...`}
-                                    className="flex-1 rounded-lg border border-slate-800 bg-slate-900/90 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-400"
-                                  />
-                                  <motion.button
-                                    type="submit"
-                                    whileTap={{ scale: 0.95 }}
-                                    transition={SPRING_TRANSITION}
-                                    className={`inline-flex items-center justify-center gap-1 rounded-lg px-3.5 py-2 font-mono text-[11px] font-extrabold text-slate-950 ${
-                                      hunter.themeAccent === 'cyan'
-                                        ? 'bg-cyan-400 hover:bg-cyan-300'
-                                        : 'bg-orange-400 hover:bg-orange-300'
-                                    }`}
-                                  >
-                                    <Plus className="h-3.5 w-3.5" />
-                                    <span>Crear</span>
-                                  </motion.button>
-                                </div>
-                              </form>
+                                  return (
+                                    <div
+                                      key={quest.id}
+                                      className={`rounded-xl border p-3 transition-colors ${
+                                        isCompleted
+                                          ? 'border-[#10B981]/30 bg-[#10B981]/[0.03]'
+                                          : isInCourse
+                                          ? 'border-[#0066C5]/40 bg-[#0066C5]/[0.03]'
+                                          : 'border-[#E2E8F0] bg-white'
+                                      }`}
+                                    >
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          <span className="rounded-md bg-[#F8FAFC] px-2 py-0.5 text-[11px] font-semibold text-[#0F172A] ring-1 ring-[#E2E8F0]">
+                                            {quest.client || 'Zenda Agency'}
+                                          </span>
 
-                              {/* Cartas de Misión RPG (Máximo 3 visibles por jugador) */}
-                              <div className="mt-3.5 space-y-3">
-                                {hunter.missionsData.top3.length === 0 ? (
-                                  <div className="rounded-2xl border border-dashed border-slate-800 bg-[#070A12]/60 p-6 text-center">
-                                    <p className="font-mono text-xs font-bold text-slate-400">
-                                      [SISTEMA: 0/3 QUESTS ASIGNADAS A {hunter.player.toUpperCase()}]
-                                    </p>
-                                    <p className="mt-1 font-mono text-[11px] text-slate-500">
-                                      Crea una Quest arriba (+100 XP Guion, +150 XP Grabación o +200 XP Reel Publicado).
-                                    </p>
-                                  </div>
-                                ) : (
-                                  hunter.missionsData.top3.map((quest, qIdx) => {
-                                    const rpgStatus = getQuestRpgStatus(quest);
-                                    const diffInfo = getQuestDifficultyInfo(quest);
-                                    const isPending = rpgStatus === 'Pendiente';
-                                    const isInCourse = rpgStatus === 'En Curso';
-                                    const isCompleted = rpgStatus === 'Completado';
-
-                                    const matchingClient = zendaClients.find(
-                                      (c) =>
-                                        normalizeAccountKey(c.name) ===
-                                        normalizeAccountKey(quest.client),
-                                    );
-                                    const brandDotColor =
-                                      matchingClient?.brandColors?.[0] || '#06B6D4';
-
-                                    const cardBorder = isCompleted
-                                      ? 'border-emerald-500/60 bg-gradient-to-br from-emerald-950/40 via-[#081217] to-[#070A12] shadow-[0_0_20px_rgba(16,185,129,0.15)]'
-                                      : isInCourse
-                                      ? 'border-orange-500/70 bg-gradient-to-br from-orange-950/35 via-[#110F1D] to-[#070A12] shadow-[0_0_20px_rgba(249,115,22,0.2)]'
-                                      : 'border-slate-800 bg-[#080C16] hover:border-cyan-500/40';
-
-                                    const actionBtnText = isPending
-                                      ? '⚔️ 1-Clic: Iniciar Quest (En Curso) →'
-                                      : isInCourse
-                                      ? `⚡ 1-Clic: Completar Quest (+${diffInfo.xp} XP) ✓`
-                                      : `✅ Quest Completada (+${diffInfo.xp} XP Reclamados)`;
-
-                                    return (
-                                      <motion.div
-                                        key={quest.id}
-                                        layout
-                                        initial={{ opacity: 0, y: 6 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        className={`relative rounded-2xl border p-4 transition-all ${cardBorder}`}
-                                      >
-                                        {/* Fila Superior de la Carta de Misión: Cliente + Dificultad XP + Acciones */}
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                          <div className="flex flex-wrap items-center gap-1.5">
-                                            <span className="rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] font-black text-cyan-400 ring-1 ring-slate-700">
-                                              Q{qIdx + 1}
-                                            </span>
-
-                                            {/* Etiqueta de Cliente */}
-                                            <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/90 px-2.5 py-0.5 font-mono text-[11px] font-bold text-white">
-                                              <span
-                                                className="h-2 w-2 rounded-full"
-                                                style={{ backgroundColor: brandDotColor }}
-                                              />
-                                              {quest.client || 'Zenda Agency'}
-                                            </span>
-
-                                            {/* Selector táctil de Dificultad (+100 XP Guion | +150 XP Grabación | +200 XP Reel Publicado) */}
-                                            <select
-                                              value={diffInfo.id}
-                                              onChange={(e) =>
-                                                handleChangeQuestDifficulty(quest, e.target.value)
-                                              }
-                                              className={`cursor-pointer rounded-lg border px-2 py-0.5 font-mono text-[10px] font-extrabold outline-none ${diffInfo.colorClass}`}
-                                              title="Cambiar dificultad y recompensa de XP de esta Quest"
-                                            >
-                                              {QUEST_DIFFICULTIES.map((d) => (
-                                                <option
-                                                  key={d.id}
-                                                  value={d.id}
-                                                  className="bg-slate-950 text-white"
-                                                >
-                                                  {d.badgeLabel}
-                                                </option>
-                                              ))}
-                                            </select>
-                                          </div>
-
-                                          <div className="flex items-center gap-1">
-                                            <button
-                                              type="button"
-                                              onClick={() => handleSwitchMissionAssignee(quest)}
-                                              className="rounded-lg border border-slate-800 bg-slate-900 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-400 hover:border-slate-600 hover:text-white"
-                                              title="Transferir Quest entre Kevin y Marco"
-                                            >
-                                              @{normalizeAssignee(quest.assignee)}
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => handleDeleteSprint(quest.id)}
-                                              className="rounded-lg p-1 text-slate-500 hover:bg-rose-500/15 hover:text-rose-400"
-                                              title="Eliminar Quest"
-                                            >
-                                              <Trash2 className="h-3.5 w-3.5" />
-                                            </button>
-                                          </div>
+                                          <select
+                                            value={diffInfo.id}
+                                            onChange={(e) =>
+                                              handleChangeQuestDifficulty(quest, e.target.value)
+                                            }
+                                            className={`cursor-pointer rounded-md border px-2 py-0.5 font-mono text-[10px] font-bold outline-none ${diffInfo.colorClass}`}
+                                          >
+                                            {QUEST_DIFFICULTIES.map((d) => (
+                                              <option key={d.id} value={d.id}>
+                                                {d.badgeLabel}
+                                              </option>
+                                            ))}
+                                          </select>
                                         </div>
 
-                                        {/* Título de la Misión */}
-                                        <p
-                                          className={`mt-2.5 text-sm font-extrabold leading-snug ${
-                                            isCompleted
-                                              ? 'line-through text-emerald-300/70'
-                                              : 'text-white'
-                                          }`}
-                                        >
-                                          {quest.title}
-                                        </p>
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSwitchMissionAssignee(quest)}
+                                            className="rounded-md border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-0.5 font-mono text-[10px] font-medium text-slate-600 hover:text-[#0F172A]"
+                                            title="Cambiar responsable"
+                                          >
+                                            @{normalizeAssignee(quest.assignee)}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteSprint(quest.id)}
+                                            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-[#EF4444]"
+                                            title="Eliminar"
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
 
-                                        {/* Píldoras de Estado RPG: Pendiente → En Curso → Completado */}
-                                        <div className="mt-3 grid grid-cols-3 gap-1.5 rounded-xl border border-slate-800/90 bg-[#05080F] p-1">
-                                          {QUEST_STATES.map((st, sIdx) => {
-                                            const currentIdx = QUEST_STATES.indexOf(rpgStatus);
-                                            const isCurrent = rpgStatus === st;
-                                            const isPassed = sIdx < currentIdx;
+                                      <p
+                                        className={`mt-2 text-sm font-semibold ${
+                                          isCompleted
+                                            ? 'line-through text-slate-400'
+                                            : 'text-[#0F172A]'
+                                        }`}
+                                      >
+                                        {quest.title}
+                                      </p>
 
+                                      <div className="mt-2.5 flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-1">
+                                          {QUEST_STATES.map((st) => {
+                                            const active = rpgStatus === st;
                                             return (
                                               <button
                                                 key={st}
@@ -3589,62 +3285,43 @@ export default function AdminDashboard() {
                                                 onClick={() =>
                                                   handleAdvanceQuestRpgState(quest, st)
                                                 }
-                                                className={`rounded-lg py-1 font-mono text-[10px] font-extrabold transition-all ${
-                                                  isCurrent
+                                                className={`rounded-md px-2 py-1 font-mono text-[10px] font-semibold transition-colors ${
+                                                  active
                                                     ? st === 'Completado'
-                                                      ? 'bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.5)]'
-                                                      : st === 'En Curso'
-                                                      ? 'bg-orange-500 text-slate-950 shadow-[0_0_10px_rgba(249,115,22,0.5)]'
-                                                      : 'bg-cyan-500/25 text-cyan-300 ring-1 ring-cyan-400/40'
-                                                    : isPassed
-                                                    ? 'bg-emerald-500/10 text-emerald-400'
-                                                    : 'text-slate-500 hover:text-slate-300'
+                                                      ? 'bg-[#10B981] text-white'
+                                                      : 'bg-[#0066C5] text-white'
+                                                    : 'bg-[#F8FAFC] text-slate-500 hover:text-[#0F172A]'
                                                 }`}
                                               >
-                                                {isPassed ? `✓ ${st}` : st}
+                                                {st}
                                               </button>
                                             );
                                           })}
                                         </div>
 
-                                        {/* Botón de 1 Clic para Avanzar Estado (Pendiente → En Curso → Completado) */}
-                                        <motion.button
+                                        <button
                                           type="button"
-                                          whileHover={{ y: -1 }}
-                                          whileTap={{ scale: 0.96 }}
-                                          animate={{
-                                            scale: isCompleted ? [1, 1.04, 1] : 1,
-                                          }}
-                                          transition={SPRING_TRANSITION}
                                           onClick={() => handleAdvanceQuestRpgState(quest)}
-                                          className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-mono text-xs font-black transition-all ${
+                                          className={`rounded-lg px-3 py-1 font-mono text-[11px] font-bold transition-colors ${
                                             isPending
-                                              ? 'border border-cyan-400/50 bg-cyan-500/20 text-cyan-200 hover:bg-cyan-400 hover:text-slate-950'
+                                              ? 'border border-[#0066C5] text-[#0066C5] hover:bg-[#0066C5] hover:text-white'
                                               : isInCourse
-                                              ? 'bg-gradient-to-r from-orange-500 via-amber-500 to-emerald-500 text-slate-950 shadow-[0_0_18px_rgba(249,115,22,0.45)] hover:brightness-110'
-                                              : 'border border-emerald-500/50 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+                                              ? 'bg-[#0066C5] text-white hover:bg-[#0052A3]'
+                                              : 'bg-[#10B981]/15 text-[#10B981]'
                                           }`}
                                         >
-                                          <span>{actionBtnText}</span>
-                                        </motion.button>
-                                      </motion.div>
-                                    );
-                                  })
-                                )}
-                              </div>
+                                          {isPending
+                                            ? 'Iniciar →'
+                                            : isInCourse
+                                            ? `Completar (+${diffInfo.xp} XP)`
+                                            : 'Completado ✓'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
                             </div>
-                          </div>
-
-                          {/* Pie del Panel del Jugador */}
-                          <div className="mt-4 flex items-center justify-between border-t border-slate-800/80 pt-3 font-mono text-[11px] text-slate-400">
-                            <span>
-                              Quests activas hoy: <strong className="text-white">{hunter.missionsData.top3.length}/3</strong>
-                            </span>
-                            <span>
-                              {hunter.missionsData.remainingBacklog.length > 0
-                                ? `+${hunter.missionsData.remainingBacklog.length} en reserva inferior`
-                                : 'Reserva limpia ✓'}
-                            </span>
                           </div>
                         </div>
                       );
@@ -3653,78 +3330,52 @@ export default function AdminDashboard() {
                 </section>
 
                 {/* ============================================================ */}
-                {/* 4. RESERVA DE MISIONES / BACKLOG COLAPSADO POR CLIENTE       */}
+                {/* 3. BACKLOG COLAPSADO POR CLIENTE                             */}
                 {/* ============================================================ */}
                 <section
-                  aria-label="Reserva de Quests Colapsada por Cliente"
-                  className="rounded-2xl border border-slate-800/90 bg-[#0A0F1C] p-4 sm:p-6 shadow-xl"
+                  aria-label="Reserva de Quests por Cliente"
+                  className="rounded-2xl border border-[#E2E8F0] bg-[#FFFFFF] p-4 sm:p-5 shadow-sm"
                 >
-                  <div className="flex flex-col gap-4 border-b border-slate-800 pb-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <Filter className="h-4 w-4 text-cyan-400" />
-                        <h2 className="font-mono text-xs font-extrabold uppercase tracking-wider text-white sm:text-sm">
-                          Reserva Táctica de Quests por Cliente (Acordeón Colapsado)
-                        </h2>
-                      </div>
-                      <p className="mt-0.5 font-mono text-[11px] text-slate-400">
-                        Colapsado por defecto para mantener el HUD enfocado en las 3 Quests del Día de Kevin y Marco.
-                      </p>
+                  <div className="flex flex-col gap-3 border-b border-[#E2E8F0] pb-3.5 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2">
+                      <Filter className="h-4 w-4 text-[#0066C5]" />
+                      <h2 className="text-sm font-bold text-[#0F172A]">
+                        Backlog por Cuenta
+                      </h2>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="relative">
-                        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" />
+                        <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
                         <input
                           type="text"
                           value={backlogSearchQuery}
                           onChange={(e) => setBacklogSearchQuery(e.target.value)}
-                          placeholder="Buscar quest..."
-                          className="w-40 sm:w-48 rounded-xl border border-slate-800 bg-slate-900 py-1.5 pl-8 pr-3 font-mono text-[11px] text-white placeholder-slate-500 outline-none focus:border-cyan-400"
+                          placeholder="Buscar..."
+                          className="w-36 sm:w-44 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] py-1 pl-8 pr-2.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5] focus:bg-white"
                         />
                       </div>
 
-                      <div className="flex rounded-xl border border-slate-800 bg-slate-900 p-0.5 font-mono text-[11px]">
+                      <div className="flex rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-0.5 text-xs">
                         {['all', 'Kevin', 'Marco'].map((who) => (
                           <button
                             key={who}
                             type="button"
                             onClick={() => setBacklogAssigneeFilter(who)}
-                            className={`rounded-lg px-2.5 py-1 transition-colors ${
+                            className={`rounded-md px-2.5 py-0.5 font-medium transition-colors ${
                               backlogAssigneeFilter === who
-                                ? 'bg-cyan-500 font-extrabold text-slate-950'
-                                : 'text-slate-400 hover:text-white'
+                                ? 'bg-[#0066C5] text-white'
+                                : 'text-slate-600 hover:text-[#0F172A]'
                             }`}
                           >
                             {who === 'all' ? 'Todos' : who}
                           </button>
                         ))}
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const anyOpen = Object.values(expandedBacklogClients).some(Boolean);
-                          if (anyOpen) {
-                            setExpandedBacklogClients({});
-                          } else {
-                            const allOpen = {};
-                            zendaClients.forEach((c) => {
-                              allOpen[c.id] = true;
-                            });
-                            setExpandedBacklogClients(allOpen);
-                          }
-                        }}
-                        className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-1.5 font-mono text-[11px] font-semibold text-slate-300 hover:border-slate-700 hover:text-white"
-                      >
-                        {Object.values(expandedBacklogClients).some(Boolean)
-                          ? 'Colapsar todo'
-                          : 'Expandir todo'}
-                      </button>
                     </div>
                   </div>
 
-                  <div className="mt-4 space-y-2.5">
+                  <div className="mt-3 space-y-2">
                     {backlogByClient.map((group) => {
                       const { client, filteredTasks, pendingBacklogCount } = group;
                       const isExpanded = !!expandedBacklogClients[client.id];
@@ -3733,7 +3384,7 @@ export default function AdminDashboard() {
                       return (
                         <div
                           key={`backlog-acc-${client.id}`}
-                          className="overflow-hidden rounded-2xl border border-slate-800/90 bg-[#070A12]"
+                          className="overflow-hidden rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]"
                         >
                           <button
                             type="button"
@@ -3743,30 +3394,22 @@ export default function AdminDashboard() {
                                 [client.id]: !prev[client.id],
                               }))
                             }
-                            className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors hover:bg-slate-900/80"
+                            className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-slate-100/70"
                           >
-                            <div className="flex items-center gap-3">
-                              <span
-                                className="h-3.5 w-3.5 shrink-0 rounded-full ring-2 ring-white/20"
-                                style={{
-                                  backgroundColor: client.brandColors?.[0] || '#06B6D4',
-                                }}
-                              />
-                              <span className="text-sm font-extrabold text-white">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-xs font-bold text-[#0F172A]">
                                 {client.name}
                               </span>
-                              <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 font-mono text-[10px] font-bold text-cyan-300">
-                                {pendingBacklogCount} en reserva
+                              <span className="rounded-full bg-white px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-600 ring-1 ring-[#E2E8F0]">
+                                {pendingBacklogCount} pendientes
                               </span>
                             </div>
 
-                            <motion.span
-                              animate={{ rotate: isExpanded ? 180 : 0 }}
-                              transition={{ duration: 0.2 }}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-800 bg-slate-900 text-slate-400"
-                            >
-                              <ChevronDown className="h-4 w-4" />
-                            </motion.span>
+                            <ChevronDown
+                              className={`h-4 w-4 text-slate-400 transition-transform ${
+                                isExpanded ? 'rotate-180' : ''
+                              }`}
+                            />
                           </button>
 
                           <AnimatePresence initial={false}>
@@ -3776,8 +3419,8 @@ export default function AdminDashboard() {
                                 initial={{ height: 0, opacity: 0 }}
                                 animate={{ height: 'auto', opacity: 1 }}
                                 exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.22 }}
-                                className="border-t border-slate-800 bg-[#05080F] p-4"
+                                transition={{ duration: 0.2 }}
+                                className="border-t border-[#E2E8F0] bg-white p-3.5"
                               >
                                 <form
                                   onSubmit={(e) => {
@@ -3797,7 +3440,7 @@ export default function AdminDashboard() {
                                       [client.id]: '',
                                     }));
                                   }}
-                                  className="mb-3 flex flex-col gap-2 sm:flex-row"
+                                  className="mb-3 flex gap-2"
                                 >
                                   <input
                                     type="text"
@@ -3808,24 +3451,24 @@ export default function AdminDashboard() {
                                         [client.id]: e.target.value,
                                       }))
                                     }
-                                    placeholder={`+ Agregar Quest futura a la reserva de ${client.name}...`}
-                                    className="flex-1 rounded-xl border border-slate-800 bg-slate-900 px-3.5 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-400"
+                                    placeholder={`Añadir tarea a ${client.name}...`}
+                                    className="flex-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5] focus:bg-white"
                                   />
                                   <button
                                     type="submit"
-                                    className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-cyan-500 px-4 py-2 font-mono text-xs font-extrabold text-slate-950 hover:bg-cyan-400"
+                                    className="inline-flex items-center gap-1 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0052A3]"
                                   >
                                     <Plus className="h-3.5 w-3.5" />
-                                    Guardar Quest
+                                    Guardar
                                   </button>
                                 </form>
 
                                 {filteredTasks.length === 0 ? (
-                                  <p className="py-4 text-center font-mono text-xs text-slate-500">
-                                    Sin quests registradas en la reserva de {client.name}.
+                                  <p className="py-2 text-center text-xs text-slate-400">
+                                    Sin tareas en reserva.
                                   </p>
                                 ) : (
-                                  <div className="space-y-2">
+                                  <div className="space-y-1.5">
                                     {filteredTasks.map((task) => {
                                       const rpgSt = getQuestRpgStatus(task);
                                       const diffInfo = getQuestDifficultyInfo(task);
@@ -3835,51 +3478,41 @@ export default function AdminDashboard() {
                                       return (
                                         <div
                                           key={task.id}
-                                          className="flex flex-col gap-2.5 rounded-xl border border-slate-800 bg-[#0A0F1D] p-3 sm:flex-row sm:items-center sm:justify-between"
+                                          className="flex flex-col gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2.5 sm:flex-row sm:items-center sm:justify-between"
                                         >
-                                          <div className="space-y-1">
-                                            <div className="flex flex-wrap items-center gap-1.5">
-                                              {inTop3 && (
-                                                <span className="rounded border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 font-mono text-[10px] font-bold text-cyan-300">
-                                                  ⚡ En Tablero de Hoy
-                                                </span>
-                                              )}
-                                              <button
-                                                type="button"
-                                                onClick={() => handleSwitchMissionAssignee(task)}
-                                                className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-bold ${
-                                                  assignee === 'Kevin'
-                                                    ? 'bg-cyan-500/20 text-cyan-300'
-                                                    : 'bg-orange-500/20 text-orange-300'
-                                                }`}
-                                              >
-                                                @{assignee}
-                                              </button>
-                                              <span
-                                                className={`rounded border px-2 py-0.5 font-mono text-[10px] font-bold ${diffInfo.colorClass}`}
-                                              >
-                                                {diffInfo.badgeLabel}
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            {inTop3 && (
+                                              <span className="rounded bg-[#0066C5]/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#0066C5]">
+                                                Hoy
                                               </span>
-                                            </div>
-                                            <p
-                                              className={`text-xs font-bold ${
+                                            )}
+                                            <span className="font-mono text-[11px] font-semibold text-slate-500">
+                                              @{assignee}
+                                            </span>
+                                            <span
+                                              className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-bold ${diffInfo.colorClass}`}
+                                            >
+                                              {diffInfo.badgeLabel}
+                                            </span>
+                                            <span
+                                              className={`text-xs font-semibold ${
                                                 rpgSt === 'Completado'
-                                                  ? 'line-through text-slate-500'
-                                                  : 'text-white'
+                                                  ? 'line-through text-slate-400'
+                                                  : 'text-[#0F172A]'
                                               }`}
                                             >
                                               {task.title}
-                                            </p>
+                                            </span>
                                           </div>
 
-                                          <div className="flex flex-wrap items-center gap-1.5">
+                                          <div className="flex items-center gap-1.5">
                                             <button
                                               type="button"
                                               onClick={() => handleAdvanceQuestRpgState(task)}
-                                              className={`rounded-lg border px-2.5 py-1.5 font-mono text-[11px] font-extrabold transition-colors ${
+                                              className={`rounded-md border px-2 py-1 font-mono text-[10px] font-bold ${
                                                 rpgSt === 'Completado'
-                                                  ? 'border-emerald-500/40 bg-emerald-500/20 text-emerald-300'
-                                                  : 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-400 hover:text-slate-950'
+                                                  ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
+                                                  : 'border-[#E2E8F0] bg-white text-[#0F172A] hover:border-[#0066C5] hover:text-[#0066C5]'
                                               }`}
                                             >
                                               {rpgSt} →
@@ -3889,17 +3522,16 @@ export default function AdminDashboard() {
                                               <button
                                                 type="button"
                                                 onClick={() => handlePromoteBacklogToToday(task)}
-                                                className="inline-flex items-center gap-1 rounded-lg border border-orange-500/40 bg-orange-500/15 px-2.5 py-1.5 font-mono text-[10px] font-extrabold text-orange-300 hover:bg-orange-500 hover:text-slate-950"
+                                                className="rounded-md bg-[#0066C5]/10 px-2 py-1 font-mono text-[10px] font-bold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
                                               >
-                                                <Zap className="h-3 w-3" />
-                                                Subir a Quests de Hoy
+                                                Subir a Hoy
                                               </button>
                                             )}
 
                                             <button
                                               type="button"
                                               onClick={() => handleDeleteSprint(task.id)}
-                                              className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/15 hover:text-rose-400"
+                                              className="rounded p-1 text-slate-400 hover:text-[#EF4444]"
                                             >
                                               <Trash2 className="h-3.5 w-3.5" />
                                             </button>
