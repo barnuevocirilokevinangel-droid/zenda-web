@@ -6,6 +6,7 @@ import {
   ArrowDownRight,
   ArrowLeft,
   ArrowUpRight,
+  Bell,
   Building2,
   Calendar as CalendarIcon,
   Check,
@@ -18,6 +19,7 @@ import {
   Code2,
   Copy,
   CreditCard,
+  Crown,
   ExternalLink,
   Eye,
   FileText,
@@ -34,6 +36,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Settings,
   Trash2,
   Trophy,
   Wallet,
@@ -49,13 +52,23 @@ const MISSION_STAGES = ['Guion', 'Grabado', 'Editado', 'Publicado'];
 const QUEST_STATES = ['Pendiente', 'En Curso', 'Completado'];
 const WEEKLY_AGENCY_GOAL = 12;
 const XP_PER_LEVEL = 500;
+const CURRENT_SEASON_VERSION = 'official_zero_v1';
+
+// Categorías adicionales para Misiones Personales, Hábitos y Operación Interna
+const PERSONAL_QUEST_CATEGORIES = [
+  'Personal / Hábito',
+  'Estudio / Entreno',
+  'Operación Interna',
+];
 
 const QUEST_DIFFICULTIES = [
+  // Misiones de Clientes & Agencia
   {
     id: 'Guion',
     label: 'Guion',
     badgeLabel: '+100 XP · Guion',
     xp: 100,
+    group: 'client',
     colorClass: 'border-[#E2E8F0] bg-[#F8FAFC] text-[#0F172A]',
   },
   {
@@ -63,6 +76,7 @@ const QUEST_DIFFICULTIES = [
     label: 'Grabación',
     badgeLabel: '+150 XP · Grabación',
     xp: 150,
+    group: 'client',
     colorClass: 'border-[#0066C5]/25 bg-[#0066C5]/10 text-[#0066C5]',
   },
   {
@@ -70,9 +84,75 @@ const QUEST_DIFFICULTIES = [
     label: 'Reel Publicado',
     badgeLabel: '+200 XP · Reel Publicado',
     xp: 200,
+    group: 'client',
     colorClass: 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]',
   },
+  // Misiones Personales y Hábitos
+  {
+    id: 'Hábito Diario',
+    label: 'Hábito Diario',
+    badgeLabel: '+50 XP · Hábito Diario',
+    xp: 50,
+    group: 'personal',
+    colorClass: 'border-[#E2E8F0] bg-[#F8FAFC] text-slate-700',
+  },
+  {
+    id: 'Tarea Personal / Estudio',
+    label: 'Tarea Personal / Estudio',
+    badgeLabel: '+100 XP · Tarea Personal / Estudio',
+    xp: 100,
+    group: 'personal',
+    colorClass: 'border-[#0066C5]/20 bg-[#0066C5]/5 text-[#0066C5]',
+  },
+  {
+    id: 'Entreno / Bloque Profundo',
+    label: 'Entreno / Bloque Profundo',
+    badgeLabel: '+150 XP · Entreno / Bloque Profundo',
+    xp: 150,
+    group: 'personal',
+    colorClass: 'border-[#10B981]/25 bg-[#10B981]/10 text-[#10B981]',
+  },
 ];
+
+function isPersonalCategory(categoryName) {
+  const s = String(categoryName || '').toLowerCase();
+  return (
+    s.includes('personal') ||
+    s.includes('hábito') ||
+    s.includes('habito') ||
+    s.includes('estudio') ||
+    s.includes('entreno') ||
+    s.includes('operación interna') ||
+    s.includes('operacion interna')
+  );
+}
+
+function getDefaultDifficultyForCategory(categoryName) {
+  const s = String(categoryName || '').toLowerCase();
+  if (s.includes('hábito') || s.includes('habito') || s.includes('personal')) {
+    return 'Hábito Diario';
+  }
+  if (s.includes('entreno') || s.includes('estudio')) {
+    return 'Entreno / Bloque Profundo';
+  }
+  if (s.includes('operación') || s.includes('operacion')) {
+    return 'Tarea Personal / Estudio';
+  }
+  return 'Guion';
+}
+
+function formatExactTime(dateInput = new Date()) {
+  try {
+    const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+    return d.toLocaleTimeString('es-PE', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return '';
+  }
+}
 
 const CONFETTI_PARTICLES = Array.from({ length: 24 }, (_, i) => ({
   id: i,
@@ -114,6 +194,11 @@ function playRpgSound(type = 'xp', enabled = true) {
       playTone(440, 0, 0.14, 0.06, 'sine');
       playTone(554.37, 0.07, 0.16, 0.06, 'sine');
       playTone(659.25, 0.14, 0.24, 0.07, 'triangle');
+    } else if (type === 'alert') {
+      // Timbre sutil de recordatorio de calendario (15 min antes / 7:25 AM Despegue)
+      playTone(659.25, 0, 0.12, 0.06, 'sine');
+      playTone(880, 0.1, 0.18, 0.07, 'sine');
+      playTone(1046.5, 0.22, 0.25, 0.06, 'triangle');
     } else if (type === 'fanfare') {
       playTone(523.25, 0, 0.13, 0.07, 'triangle');
       playTone(659.25, 0.1, 0.13, 0.07, 'triangle');
@@ -132,7 +217,7 @@ function playRpgSound(type = 'xp', enabled = true) {
 const getTodayDate = () => new Date().toISOString().split('T')[0];
 
 /**
- * Normaliza el nombre de cuenta para cruzar tareas de Zenda Agency, Dolciangel, La Lanchita y King's Barber Shop
+ * Normaliza el nombre de cuenta o categoría personal para cruzar tareas
  * independientemente de tildes o variantes de escritura.
  */
 function normalizeAccountKey(rawName) {
@@ -143,6 +228,9 @@ function normalizeAccountKey(rawName) {
   if (s.includes('dolci')) return 'dolciangel';
   if (s.includes('lanchita')) return 'lalanchita';
   if (s.includes('king') || s.includes('barber')) return 'kings';
+  if (s.includes('personal') || s.includes('hábito') || s.includes('habito')) return 'personal';
+  if (s.includes('estudio') || s.includes('entreno')) return 'estudio';
+  if (s.includes('operación') || s.includes('operacion')) return 'operacion';
   return s;
 }
 
@@ -157,17 +245,31 @@ function normalizeAssignee(rawAssignee) {
 }
 
 /**
- * Obtiene la dificultad RPG de una misión (+100 XP Guion, +150 XP Grabación, +200 XP Reel Publicado)
+ * Obtiene la dificultad RPG de una misión:
+ * - Clientes: +100 XP Guion, +150 XP Grabación, +200 XP Reel Publicado
+ * - Personales: +50 XP Hábito Diario, +100 XP Tarea Personal / Estudio, +150 XP Entreno / Bloque Profundo
  */
 function getQuestDifficultyInfo(task) {
+  const exactMatch = QUEST_DIFFICULTIES.find((d) => d.id === task?.questDifficulty);
+  if (exactMatch) return exactMatch;
+
   const raw = String(task?.questDifficulty || task?.stage || '').toLowerCase();
+  if (raw.includes('hábito') || raw.includes('habito')) {
+    return QUEST_DIFFICULTIES[3]; // +50 XP · Hábito Diario
+  }
+  if (raw.includes('tarea personal') || raw.includes('estudio')) {
+    return QUEST_DIFFICULTIES[4]; // +100 XP · Tarea Personal / Estudio
+  }
+  if (raw.includes('entreno') || raw.includes('bloque profundo')) {
+    return QUEST_DIFFICULTIES[5]; // +150 XP · Entreno / Bloque Profundo
+  }
   if (raw.includes('reel') || raw.includes('publicado')) {
-    return QUEST_DIFFICULTIES[2]; // +200 XP Reel Publicado
+    return QUEST_DIFFICULTIES[2]; // +200 XP · Reel Publicado
   }
   if (raw.includes('grab')) {
-    return QUEST_DIFFICULTIES[1]; // +150 XP Grabación
+    return QUEST_DIFFICULTIES[1]; // +150 XP · Grabación
   }
-  return QUEST_DIFFICULTIES[0]; // +100 XP Guion
+  return QUEST_DIFFICULTIES[0]; // +100 XP · Guion
 }
 
 /**
@@ -427,30 +529,42 @@ export default function AdminDashboard() {
   const [healedClientFlashId, setHealedClientFlashId] = useState(null);
   const [floatingXpPopup, setFloatingXpPopup] = useState(null); // { player: 'Kevin' | 'Marco', amount: 150, label: '+150 XP' }
 
-  // Estado RPG sincronizado en tiempo real con Firestore ('zenda_system/rpg_state')
-  // manteniendo localStorage ('zenda_rpg_os_v1') únicamente como caché rápida de arranque
+  // Estado RPG Oficial (Temporada 0 XP) sincronizado en tiempo real con Firestore ('zenda_system/rpg_state')
+  // manteniendo localStorage ('zenda_rpg_os_v2') únicamente como caché rápida de arranque
   const [rpgSyncOnline, setRpgSyncOnline] = useState(() => Boolean(isFirebaseConfigured && db));
-  const [rpgState, setRpgState] = useState(() => {
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
+  const [isResettingSeason, setIsResettingSeason] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return 'default';
+  });
+
+  const getOfficialZeroRpgDefaults = (overrides = {}) => {
     const defaultClientHp = {
       'client-zenda-agency': 100,
       'client-dolciangel': 100,
       'client-lalanchita': 100,
       'client-kings-barber-shop': 100,
     };
-    const defaults = {
-      xp: { Kevin: 1200, Marco: 1150 },
-      level: { Kevin: 3, Marco: 3 },
-      streak: { Kevin: 4, Marco: 4 },
+    return {
+      seasonVersion: CURRENT_SEASON_VERSION,
+      xp: { Kevin: 0, Marco: 0 },
+      level: { Kevin: 1, Marco: 1 },
+      streak: { Kevin: 0, Marco: 0 },
       clientsHp: defaultClientHp,
       weeklyReels: 0,
       weeklyReward: 'Cena Libre + Tarde Libre de Socios',
       quests: [],
-      kevinBaseXP: 1200,
-      marcoBaseXP: 1150,
-      kevinLevel: 3,
-      marcoLevel: 3,
-      kevinEarlyStreak: 4,
-      marcoEarlyStreak: 4,
+      activityLog: [],
+      webhookUrl: '',
+      kevinBaseXP: 0,
+      marcoBaseXP: 0,
+      kevinLevel: 1,
+      marcoLevel: 1,
+      kevinEarlyStreak: 0,
+      marcoEarlyStreak: 0,
       kevinLastCheckIn: '',
       marcoLastCheckIn: '',
       weeklyRewardText: 'Cena Libre + Tarde Libre de Socios',
@@ -460,28 +574,44 @@ export default function AdminDashboard() {
       manualBossReelsBonus: 0,
       bossChestReelsCount: 0,
       updatedAt: '',
+      ...overrides,
     };
+  };
+
+  const [rpgState, setRpgState] = useState(() => {
+    const defaults = getOfficialZeroRpgDefaults();
     try {
-      const raw = localStorage.getItem('zenda_rpg_os_v1');
+      localStorage.removeItem('zenda_rpg_os_v1');
+      const raw = localStorage.getItem('zenda_rpg_os_v2');
       if (!raw) return defaults;
       const parsed = JSON.parse(raw);
+      if (parsed.seasonVersion !== CURRENT_SEASON_VERSION) {
+        localStorage.removeItem('zenda_rpg_os_v2');
+        return defaults;
+      }
+      const kevinXP = Number(parsed.kevinBaseXP ?? parsed.xp?.Kevin ?? 0);
+      const marcoXP = Number(parsed.marcoBaseXP ?? parsed.xp?.Marco ?? 0);
+      const kevinStrk = Number(parsed.kevinEarlyStreak ?? parsed.streak?.Kevin ?? 0);
+      const marcoStrk = Number(parsed.marcoEarlyStreak ?? parsed.streak?.Marco ?? 0);
       return {
         ...defaults,
         ...parsed,
-        xp: parsed.xp || {
-          Kevin: Number(parsed.kevinBaseXP ?? 1200),
-          Marco: Number(parsed.marcoBaseXP ?? 1150),
+        kevinBaseXP: kevinXP,
+        marcoBaseXP: marcoXP,
+        kevinLevel: Math.floor(kevinXP / XP_PER_LEVEL) + 1,
+        marcoLevel: Math.floor(marcoXP / XP_PER_LEVEL) + 1,
+        kevinEarlyStreak: kevinStrk,
+        marcoEarlyStreak: marcoStrk,
+        xp: { Kevin: kevinXP, Marco: marcoXP },
+        level: {
+          Kevin: Math.floor(kevinXP / XP_PER_LEVEL) + 1,
+          Marco: Math.floor(marcoXP / XP_PER_LEVEL) + 1,
         },
-        level: parsed.level || {
-          Kevin: Number(parsed.kevinLevel ?? 3),
-          Marco: Number(parsed.marcoLevel ?? 3),
-        },
-        streak: parsed.streak || {
-          Kevin: Number(parsed.kevinEarlyStreak ?? 4),
-          Marco: Number(parsed.marcoEarlyStreak ?? 4),
-        },
-        clientsHp: parsed.clientsHp || parsed.clientHpMap || defaultClientHp,
+        streak: { Kevin: kevinStrk, Marco: marcoStrk },
+        clientsHp: parsed.clientsHp || parsed.clientHpMap || defaults.clientsHp,
         weeklyReward: parsed.weeklyReward || parsed.weeklyRewardText || defaults.weeklyReward,
+        activityLog: Array.isArray(parsed.activityLog) ? parsed.activityLog : [],
+        webhookUrl: parsed.webhookUrl || '',
       };
     } catch {
       return defaults;
@@ -513,19 +643,23 @@ export default function AdminDashboard() {
   const updateRpgState = (updater) => {
     setRpgState((prev) => {
       const partial = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
-      const kevinXP = Number(
-        partial.kevinBaseXP ?? partial.xp?.Kevin ?? prev.kevinBaseXP ?? prev.xp?.Kevin ?? 1200,
+      const kevinXP = Math.max(
+        0,
+        Number(partial.kevinBaseXP ?? partial.xp?.Kevin ?? prev.kevinBaseXP ?? prev.xp?.Kevin ?? 0),
       );
-      const marcoXP = Number(
-        partial.marcoBaseXP ?? partial.xp?.Marco ?? prev.marcoBaseXP ?? prev.xp?.Marco ?? 1150,
+      const marcoXP = Math.max(
+        0,
+        Number(partial.marcoBaseXP ?? partial.xp?.Marco ?? prev.marcoBaseXP ?? prev.xp?.Marco ?? 0),
       );
       const kevinLvl = Math.floor(kevinXP / XP_PER_LEVEL) + 1;
       const marcoLvl = Math.floor(marcoXP / XP_PER_LEVEL) + 1;
-      const kevinStrk = Number(
-        partial.kevinEarlyStreak ?? partial.streak?.Kevin ?? prev.kevinEarlyStreak ?? 4,
+      const kevinStrk = Math.max(
+        0,
+        Number(partial.kevinEarlyStreak ?? partial.streak?.Kevin ?? prev.kevinEarlyStreak ?? 0),
       );
-      const marcoStrk = Number(
-        partial.marcoEarlyStreak ?? partial.streak?.Marco ?? prev.marcoEarlyStreak ?? 4,
+      const marcoStrk = Math.max(
+        0,
+        Number(partial.marcoEarlyStreak ?? partial.streak?.Marco ?? prev.marcoEarlyStreak ?? 0),
       );
       const rewardStr =
         partial.weeklyRewardText ??
@@ -538,13 +672,22 @@ export default function AdminDashboard() {
         ...(partial.clientHpMap || {}),
         ...(partial.clientsHp || {}),
       };
-      const reelsCount = Number(
-        partial.weeklyReels ?? partial.bossChestReelsCount ?? prev.bossChestReelsCount ?? 0,
+      const reelsCount = Math.max(
+        0,
+        Number(partial.weeklyReels ?? partial.bossChestReelsCount ?? prev.bossChestReelsCount ?? 0),
       );
+      const nextActivityLog = Array.isArray(partial.activityLog)
+        ? partial.activityLog.slice(0, 15)
+        : Array.isArray(prev.activityLog)
+        ? prev.activityLog.slice(0, 15)
+        : [];
+      const nextWebhookUrl =
+        partial.webhookUrl !== undefined ? partial.webhookUrl : prev.webhookUrl || '';
 
       const next = {
         ...prev,
         ...partial,
+        seasonVersion: CURRENT_SEASON_VERSION,
         kevinBaseXP: kevinXP,
         marcoBaseXP: marcoXP,
         kevinLevel: kevinLvl,
@@ -560,6 +703,8 @@ export default function AdminDashboard() {
         xp: { Kevin: kevinXP, Marco: marcoXP },
         level: { Kevin: kevinLvl, Marco: marcoLvl },
         streak: { Kevin: kevinStrk, Marco: marcoStrk },
+        activityLog: nextActivityLog,
+        webhookUrl: nextWebhookUrl,
         quests: Array.isArray(partial.quests)
           ? partial.quests
           : Array.isArray(prev.quests)
@@ -568,7 +713,7 @@ export default function AdminDashboard() {
         updatedAt: new Date().toISOString(),
       };
       try {
-        localStorage.setItem('zenda_rpg_os_v1', JSON.stringify(next));
+        localStorage.setItem('zenda_rpg_os_v2', JSON.stringify(next));
       } catch {
         // ignore localStorage cache errors
       }
@@ -624,6 +769,7 @@ export default function AdminDashboard() {
     title: '',
     client: 'Zenda Agency',
     assignee: 'Kevin',
+    questDifficulty: 'Guion',
     stage: 'Guion',
     priority: 'Alta',
     deadline: getTodayDate(),
@@ -693,6 +839,205 @@ export default function AdminDashboard() {
   };
 
   // ============================================================================
+  // NOTIFICACIONES DE CALENDARIO (WEB PUSH + WEBHOOK OPCIONAL n8n/WhatsApp)
+  // ============================================================================
+  const sendCalendarWebhookPost = async ({
+    title,
+    time,
+    assignedTo,
+    client = 'Zenda Agency',
+    type = 'Alerta Calendario',
+    date = todayDateStr,
+    trigger = 'calendar_alert',
+  }) => {
+    const targetUrl = String(rpgState.webhookUrl || '').trim();
+    if (!targetUrl) return;
+    try {
+      await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          time,
+          assignedTo,
+          client,
+          type,
+          date,
+          trigger,
+          triggeredAt: new Date().toISOString(),
+        }),
+      });
+    } catch (err) {
+      console.warn('[Webhook] Error enviando POST a Webhook URL:', err);
+    }
+  };
+
+  const handleEnableBrowserAlerts = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      showToast('Este navegador no soporta Web Notifications');
+      return;
+    }
+    try {
+      const perm = await Notification.requestPermission();
+      setNotificationPermission(perm);
+      if (perm === 'granted') {
+        playRpgSound('alert', rpgState.soundEnabled);
+        try {
+          new Notification('🔔 Alertas Zenda OS Activadas', {
+            body: 'Recibirás avisos 15 min antes de cada evento y a las 7:25 AM para el Despegue.',
+            icon: '/isotipo-zenda.png',
+          });
+        } catch {
+          // ignore notification constructor error on mobile webviews
+        }
+        showToast('🔔 Alertas del navegador activadas');
+      } else {
+        showToast('Permiso de notificaciones denegado en el navegador');
+      }
+    } catch (err) {
+      console.warn('[Notifications] Error solicitando permiso:', err);
+    }
+  };
+
+  // Watcher cada 30 segundos para eventos de hoy en zenda_calendar (15 min antes) y 7:25 AM Despegue
+  useEffect(() => {
+    const checkCalendarAlerts = () => {
+      const now = new Date();
+      const todayStr = now.toISOString().split('T')[0];
+      const currentH = now.getHours();
+      const currentM = now.getMinutes();
+
+      // 1. Alerta 7:25 AM para el Despegue (5 minutos antes de las 7:30 AM)
+      if (currentH === 7 && currentM === 25) {
+        let alreadyFiredDespegue = false;
+        try {
+          alreadyFiredDespegue =
+            localStorage.getItem('zenda_despegue_alert_date') === todayStr;
+        } catch {
+          // ignore storage error
+        }
+
+        if (!alreadyFiredDespegue) {
+          try {
+            localStorage.setItem('zenda_despegue_alert_date', todayStr);
+          } catch {
+            // ignore storage error
+          }
+          playRpgSound('alert', rpgState.soundEnabled);
+          showToast('🔔 7:25 AM · En 5 min: 7:30 AM Despegue (+50 XP)');
+          if (
+            typeof window !== 'undefined' &&
+            'Notification' in window &&
+            Notification.permission === 'granted'
+          ) {
+            try {
+              new Notification('🚀 7:25 AM · Despegue Zenda en 5 min', {
+                body: 'Kevin y Marco: el check-in 7:30 AM Despegue (+50 XP) está habilitado.',
+                icon: '/isotipo-zenda.png',
+              });
+            } catch {
+              // ignore notification error
+            }
+          }
+          sendCalendarWebhookPost({
+            title: '7:30 AM Despegue Zenda (en 5 min)',
+            time: '07:30',
+            assignedTo: 'Kevin & Marco',
+            client: 'Zenda Agency',
+            type: 'Despegue Matutino',
+            date: todayStr,
+            trigger: 'despegue_725am',
+          });
+        }
+      }
+
+      // 2. Revisar eventos del día en zenda_calendar (15 minutos antes de cada evento)
+      const todaysEvents = calendarEvents.filter(
+        (ev) => ev.date === todayStr && !ev.completed && ev.time,
+      );
+      if (!todaysEvents.length) return;
+
+      let notifiedMap = {};
+      try {
+        const rawMap = localStorage.getItem('zenda_calendar_notified_v1');
+        if (rawMap) notifiedMap = JSON.parse(rawMap);
+      } catch {
+        notifiedMap = {};
+      }
+
+      let mapUpdated = false;
+      for (const ev of todaysEvents) {
+        const notifyKey = `${ev.id}_${todayStr}_${ev.time}`;
+        if (notifiedMap[notifyKey]) continue;
+
+        const [evHourStr, evMinStr] = String(ev.time).split(':');
+        const evHour = Number(evHourStr);
+        const evMin = Number(evMinStr);
+        if (Number.isNaN(evHour) || Number.isNaN(evMin)) continue;
+
+        const eventDateObj = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          evHour,
+          evMin,
+          0,
+        );
+        const diffMinutes = (eventDateObj.getTime() - now.getTime()) / 60000;
+
+        // Dispara cuando faltan entre 1 y 15 minutos para el evento
+        if (diffMinutes > 0 && diffMinutes <= 15) {
+          notifiedMap[notifyKey] = true;
+          mapUpdated = true;
+          const minsLeft = Math.ceil(diffMinutes);
+          const assignedTo = ev.assignee || 'Equipo';
+
+          playRpgSound('alert', rpgState.soundEnabled);
+          showToast(`🔔 En ${minsLeft} min: ${ev.title} (${ev.time} · @${assignedTo})`);
+
+          if (
+            typeof window !== 'undefined' &&
+            'Notification' in window &&
+            Notification.permission === 'granted'
+          ) {
+            try {
+              new Notification(`⏰ En ${minsLeft} min: ${ev.title}`, {
+                body: `${ev.client || 'Zenda'} · ${ev.time} hrs · Asignado a @${assignedTo}`,
+                icon: '/isotipo-zenda.png',
+              });
+            } catch {
+              // ignore notification error
+            }
+          }
+
+          sendCalendarWebhookPost({
+            title: ev.title,
+            time: ev.time,
+            assignedTo,
+            client: ev.client || 'Zenda Agency',
+            type: ev.type || 'Evento Calendario',
+            date: ev.date,
+            trigger: 'alert_15m_before',
+          });
+        }
+      }
+
+      if (mapUpdated) {
+        try {
+          localStorage.setItem('zenda_calendar_notified_v1', JSON.stringify(notifiedMap));
+        } catch {
+          // ignore storage error
+        }
+      }
+    };
+
+    checkCalendarAlerts();
+    const watcherId = setInterval(checkCalendarAlerts, 30000);
+    return () => clearInterval(watcherId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendarEvents, rpgState.soundEnabled, rpgState.webhookUrl]);
+
+  // ============================================================================
   // SINCRONIZACIÓN EN TIEMPO REAL CON FIRESTORE (onSnapshot)
   // ============================================================================
   useEffect(() => {
@@ -717,50 +1062,62 @@ export default function AdminDashboard() {
             rpgDocRef,
             async (docSnap) => {
               setRpgSyncOnline(true);
-              if (!docSnap.exists()) {
+              if (!docSnap.exists() || docSnap.data()?.seasonVersion !== CURRENT_SEASON_VERSION) {
+                // Reinicio oficial a 0 XP, LVL 1, Racha 0d, 0/12 Reels al iniciar temporada oficial
+                const zeroPayload = getOfficialZeroRpgDefaults({
+                  webhookUrl: docSnap.exists() ? docSnap.data()?.webhookUrl || '' : '',
+                  updatedAt: new Date().toISOString(),
+                });
+                setRpgState(zeroPayload);
                 try {
-                  let seedPayload = rpgState;
-                  try {
-                    const cachedRaw = localStorage.getItem('zenda_rpg_os_v1');
-                    if (cachedRaw) {
-                      seedPayload = { ...rpgState, ...JSON.parse(cachedRaw) };
-                    }
-                  } catch {
-                    // ignore cache read error
-                  }
-                  await setDoc(
-                    rpgDocRef,
-                    {
-                      ...seedPayload,
-                      updatedAt: new Date().toISOString(),
-                    },
-                    { merge: true },
+                  localStorage.setItem('zenda_rpg_os_v2', JSON.stringify(zeroPayload));
+                } catch {
+                  // ignore cache write error
+                }
+                try {
+                  await setDoc(rpgDocRef, zeroPayload);
+                  await Promise.all(
+                    OFFICIAL_INITIAL_CLIENTS.map((client) =>
+                      setDoc(
+                        doc(db, 'zenda_clients', client.id),
+                        { videosPublicadosEstaSemana: 0 },
+                        { merge: true },
+                      ),
+                    ),
                   );
                 } catch (seedErr) {
-                  console.warn('[Firestore] No se pudo inicializar zenda_system/rpg_state:', seedErr);
+                  console.warn('[Firestore] No se pudo inicializar temporada 0 en zenda_system/rpg_state:', seedErr);
                 }
               } else {
                 const cloudData = docSnap.data();
                 setRpgState((prev) => {
-                  const kevinXP = Number(
-                    cloudData.kevinBaseXP ?? cloudData.xp?.Kevin ?? prev.kevinBaseXP ?? 1200,
+                  const kevinXP = Math.max(
+                    0,
+                    Number(cloudData.kevinBaseXP ?? cloudData.xp?.Kevin ?? prev.kevinBaseXP ?? 0),
                   );
-                  const marcoXP = Number(
-                    cloudData.marcoBaseXP ?? cloudData.xp?.Marco ?? prev.marcoBaseXP ?? 1150,
+                  const marcoXP = Math.max(
+                    0,
+                    Number(cloudData.marcoBaseXP ?? cloudData.xp?.Marco ?? prev.marcoBaseXP ?? 0),
                   );
                   const kevinLvl = Math.floor(kevinXP / XP_PER_LEVEL) + 1;
                   const marcoLvl = Math.floor(marcoXP / XP_PER_LEVEL) + 1;
-                  const kevinStrk = Number(
-                    cloudData.kevinEarlyStreak ??
-                      cloudData.streak?.Kevin ??
-                      prev.kevinEarlyStreak ??
-                      4,
+                  const kevinStrk = Math.max(
+                    0,
+                    Number(
+                      cloudData.kevinEarlyStreak ??
+                        cloudData.streak?.Kevin ??
+                        prev.kevinEarlyStreak ??
+                        0,
+                    ),
                   );
-                  const marcoStrk = Number(
-                    cloudData.marcoEarlyStreak ??
-                      cloudData.streak?.Marco ??
-                      prev.marcoEarlyStreak ??
-                      4,
+                  const marcoStrk = Math.max(
+                    0,
+                    Number(
+                      cloudData.marcoEarlyStreak ??
+                        cloudData.streak?.Marco ??
+                        prev.marcoEarlyStreak ??
+                        0,
+                    ),
                   );
                   const mergedHp = {
                     ...(prev.clientHpMap || {}),
@@ -776,6 +1133,7 @@ export default function AdminDashboard() {
                   const merged = {
                     ...prev,
                     ...cloudData,
+                    seasonVersion: CURRENT_SEASON_VERSION,
                     kevinBaseXP: kevinXP,
                     marcoBaseXP: marcoXP,
                     kevinLevel: kevinLvl,
@@ -787,6 +1145,13 @@ export default function AdminDashboard() {
                     xp: { Kevin: kevinXP, Marco: marcoXP },
                     level: { Kevin: kevinLvl, Marco: marcoLvl },
                     streak: { Kevin: kevinStrk, Marco: marcoStrk },
+                    activityLog: Array.isArray(cloudData.activityLog)
+                      ? cloudData.activityLog
+                      : prev.activityLog || [],
+                    webhookUrl:
+                      cloudData.webhookUrl !== undefined
+                        ? cloudData.webhookUrl
+                        : prev.webhookUrl || '',
                     manualHoursOverride: {
                       ...(prev.manualHoursOverride || {}),
                       ...(cloudData.manualHoursOverride || {}),
@@ -795,7 +1160,7 @@ export default function AdminDashboard() {
                     clientsHp: mergedHp,
                   };
                   try {
-                    localStorage.setItem('zenda_rpg_os_v1', JSON.stringify(merged));
+                    localStorage.setItem('zenda_rpg_os_v2', JSON.stringify(merged));
                   } catch {
                     // ignore localStorage cache write error
                   }
@@ -837,7 +1202,10 @@ export default function AdminDashboard() {
                 setZendaClients(completeClients);
 
                 const zendaDoc = liveClients.find((c) => c.id === 'client-zenda-agency');
-                if (zendaDoc?.rpgStateMirror) {
+                if (
+                  zendaDoc?.rpgStateMirror &&
+                  zendaDoc.rpgStateMirror.seasonVersion === CURRENT_SEASON_VERSION
+                ) {
                   setRpgState((prev) => ({
                     ...prev,
                     ...zendaDoc.rpgStateMirror,
@@ -892,7 +1260,7 @@ export default function AdminDashboard() {
               setRpgState((prev) => {
                 const next = { ...prev, quests: live };
                 try {
-                  localStorage.setItem('zenda_rpg_os_v1', JSON.stringify(next));
+                  localStorage.setItem('zenda_rpg_os_v2', JSON.stringify(next));
                 } catch {
                   // ignore localStorage error
                 }
@@ -1022,34 +1390,61 @@ export default function AdminDashboard() {
   }, []);
 
   // ============================================================================
-  // PURGA TOTAL Y REINICIO DE BASE REAL EN FIRESTORE
+  // REINICIAR TEMPORADA A 0 (0 XP, LVL 1, Racha 0d, 0/12 Reels) & REINICIO BASE
   // ============================================================================
+
+  const handleResetSeasonToZero = async () => {
+    setIsResettingSeason(true);
+    try {
+      const zeroSeasonPayload = getOfficialZeroRpgDefaults({
+        weeklyRewardText: rpgState.weeklyRewardText || 'Cena Libre + Tarde Libre de Socios',
+        weeklyReward: rpgState.weeklyRewardText || 'Cena Libre + Tarde Libre de Socios',
+        webhookUrl: rpgState.webhookUrl || '',
+        soundEnabled: rpgState.soundEnabled ?? true,
+        quests: sprints,
+        updatedAt: new Date().toISOString(),
+      });
+
+      setRpgState(zeroSeasonPayload);
+      setZendaClients((prev) =>
+        prev.map((c) => ({ ...c, videosPublicadosEstaSemana: 0 })),
+      );
+      try {
+        localStorage.setItem('zenda_rpg_os_v2', JSON.stringify(zeroSeasonPayload));
+      } catch {
+        // ignore localStorage error
+      }
+
+      if (isFirebaseConfigured && db) {
+        const { doc, setDoc } = await import('firebase/firestore');
+        await Promise.all([
+          setDoc(doc(db, 'zenda_system', 'rpg_state'), zeroSeasonPayload),
+          ...zendaClients.map((client) =>
+            setDoc(
+              doc(db, 'zenda_clients', client.id),
+              { videosPublicadosEstaSemana: 0 },
+              { merge: true },
+            ),
+          ),
+        ]);
+      }
+
+      showToast('Temporada reiniciada a 0 XP · LVL 1 · Racha 0d · 0/12 Reels');
+    } catch (err) {
+      console.warn('[Firestore] Error reiniciando temporada a 0:', err);
+      showToast('Error al reiniciar temporada');
+    } finally {
+      setIsResettingSeason(false);
+    }
+  };
 
   const handleResetRealDatabase = async () => {
     setIsResettingBase(true);
     try {
-      const resetRpgPayload = {
-        kevinBaseXP: 1200,
-        marcoBaseXP: 1150,
-        kevinLevel: 3,
-        marcoLevel: 3,
-        kevinEarlyStreak: 4,
-        marcoEarlyStreak: 4,
-        kevinLastCheckIn: '',
-        marcoLastCheckIn: '',
-        weeklyRewardText: 'Cena Libre + Tarde Libre de Socios',
-        soundEnabled: true,
-        manualHoursOverride: {},
-        clientHpMap: {
-          'client-zenda-agency': 100,
-          'client-dolciangel': 100,
-          'client-lalanchita': 100,
-          'client-kings-barber-shop': 100,
-        },
-        manualBossReelsBonus: 0,
-        bossChestReelsCount: 0,
+      const resetRpgPayload = getOfficialZeroRpgDefaults({
+        webhookUrl: rpgState.webhookUrl || '',
         updatedAt: new Date().toISOString(),
-      };
+      });
 
       if (isFirebaseConfigured && db) {
         const { collection, getDocs, deleteDoc, doc, setDoc } = await import(
@@ -1071,7 +1466,7 @@ export default function AdminDashboard() {
           await Promise.all(deletions);
         }
 
-        // Sembrar las 4 cuentas oficiales con contadores en 0 y reiniciar zenda_system/rpg_state
+        // Sembrar las 4 cuentas oficiales con contadores en 0 y reiniciar zenda_system/rpg_state en 0 XP
         await Promise.all([
           ...OFFICIAL_INITIAL_CLIENTS.map((client) =>
             setDoc(doc(db, 'zenda_clients', client.id), client),
@@ -1082,7 +1477,7 @@ export default function AdminDashboard() {
 
       setRpgState(resetRpgPayload);
       try {
-        localStorage.setItem('zenda_rpg_os_v1', JSON.stringify(resetRpgPayload));
+        localStorage.setItem('zenda_rpg_os_v2', JSON.stringify(resetRpgPayload));
       } catch {
         // ignore localStorage error
       }
@@ -1094,7 +1489,7 @@ export default function AdminDashboard() {
       setScriptsList([]);
       setSelectedClient360Id(null);
       setResetModalOpen(false);
-      showToast("Base real y estado RPG reiniciados en Firestore (zenda_system/rpg_state)");
+      showToast('Base real y temporada RPG reiniciadas a 0 en Firestore');
     } catch (err) {
       console.warn('[Firestore] Error al reiniciar base real:', err);
       showToast('Error al reiniciar base en Firestore');
@@ -1443,8 +1838,8 @@ export default function AdminDashboard() {
   /**
    * Avanza una Quest del Día en 1 clic:
    * Pendiente → En Curso → Completado
-   * Suma XP en vivo (+100 XP Guion, +150 XP Grabación, +200 XP Reel Publicado),
-   * restaura HP del cliente al 100% al publicar y dispara confeti/sonido al cerrar las 3 misiones diarias.
+   * Suma XP en vivo (+50 / +100 / +150 / +200 XP), registra en el Log de Actividad en Vivo,
+   * restaura HP del cliente al 100% si es cuenta de cliente y dispara confeti al cerrar las 3 misiones diarias.
    */
   const handleAdvanceQuestRpgState = async (task, explicitRpgStatus = null) => {
     if (!task) return;
@@ -1484,7 +1879,6 @@ export default function AdminDashboard() {
         : { publishedAt: null, completedDate: null }),
     };
 
-    // Verificar cuántas misiones tenía completadas hoy este jugador antes de esta acción
     const playerCompletedBefore = sprints.filter(
       (s) =>
         s.id !== task.id &&
@@ -1496,13 +1890,24 @@ export default function AdminDashboard() {
     setSprints(nextQuestsList);
     setNowMs(Date.now());
 
-    // Actualizar XP del jugador en vivo y sincronizar quests en zenda_system/rpg_state
+    // Actualizar XP del jugador en vivo, registrar en Log de Actividad y sincronizar en zenda_system/rpg_state
     if (isNowCompleted && !wasCompleted) {
       const xpKey = assignee === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
+      const newLogEntry = {
+        id: `act-${Date.now()}`,
+        player: assignee,
+        action: task.title,
+        category: task.client || 'Zenda Agency',
+        difficulty: diffInfo.label,
+        xp: diffInfo.xp,
+        time: formatExactTime(new Date()),
+        createdAt: nowIso,
+      };
       updateRpgState((prev) => ({
         ...prev,
-        [xpKey]: Number(prev[xpKey] || 1000) + diffInfo.xp,
+        [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0)) + diffInfo.xp,
         quests: nextQuestsList,
+        activityLog: [newLogEntry, ...(prev.activityLog || [])].slice(0, 15),
       }));
       showFloatingXp(assignee, diffInfo.xp, `+${diffInfo.xp} XP · ${diffInfo.label}`);
 
@@ -1519,7 +1924,7 @@ export default function AdminDashboard() {
       const xpKey = assignee === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
       updateRpgState((prev) => ({
         ...prev,
-        [xpKey]: Math.max(0, Number(prev[xpKey] || 1000) - diffInfo.xp),
+        [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0) - diffInfo.xp),
         quests: nextQuestsList,
       }));
       showToast(`Quest reabierta: En Curso (${task.client})`);
@@ -1531,45 +1936,54 @@ export default function AdminDashboard() {
       updateRpgState((prev) => ({ ...prev, quests: nextQuestsList }));
     }
 
-    // Si se completa la misión, restaurar el HP del cliente al 100% y actualizar contador semanal
-    const accountKey = normalizeAccountKey(task.client);
-    const matchingClient = zendaClients.find(
-      (c) => normalizeAccountKey(c.name) === accountKey,
-    );
+    // Si es una misión de cliente (no personal) y se completa, restaurar HP y actualizar reels si es Reel Publicado
+    if (!isPersonalCategory(task.client)) {
+      const accountKey = normalizeAccountKey(task.client);
+      const matchingClient = zendaClients.find(
+        (c) => normalizeAccountKey(c.name) === accountKey,
+      );
 
-    if (matchingClient && (isNowCompleted || wasCompleted)) {
-      const isReelPub = diffInfo.id === 'Reel Publicado' || isNowCompleted;
-      const currentVidCount = Number(matchingClient.videosPublicadosEstaSemana || 0);
-      const nextVidCount = isNowCompleted
-        ? currentVidCount + 1
-        : Math.max(0, currentVidCount - 1);
+      if (matchingClient && (isNowCompleted || wasCompleted)) {
+        const isReelPub = diffInfo.id === 'Reel Publicado';
+        const currentVidCount = Number(matchingClient.videosPublicadosEstaSemana || 0);
+        const nextVidCount = isNowCompleted
+          ? currentVidCount + 1
+          : Math.max(0, currentVidCount - 1);
 
-      if (isNowCompleted) {
-        setHealedClientFlashId(matchingClient.id);
-        setTimeout(() => setHealedClientFlashId(null), 2400);
-        updateRpgState((prev) => ({
-          ...prev,
-          manualHoursOverride: {
-            ...(prev.manualHoursOverride || {}),
-            [matchingClient.id]: 0,
-          },
-          clientHpMap: {
-            ...(prev.clientHpMap || {}),
-            [matchingClient.id]: 100,
-          },
-          bossChestReelsCount: Math.min(12, Number(prev.bossChestReelsCount || 0) + 1),
-        }));
-      }
+        if (isNowCompleted) {
+          setHealedClientFlashId(matchingClient.id);
+          setTimeout(() => setHealedClientFlashId(null), 2400);
+          updateRpgState((prev) => ({
+            ...prev,
+            manualHoursOverride: {
+              ...(prev.manualHoursOverride || {}),
+              [matchingClient.id]: 0,
+            },
+            clientHpMap: {
+              ...(prev.clientHpMap || {}),
+              [matchingClient.id]: 100,
+            },
+            ...(isReelPub
+              ? {
+                  bossChestReelsCount: Math.min(
+                    12,
+                    Number(prev.bossChestReelsCount || 0) + 1,
+                  ),
+                }
+              : {}),
+          }));
+        }
 
-      if (isReelPub) {
-        await handleUpdateClientField(
-          matchingClient.id,
-          {
-            videosPublicadosEstaSemana: nextVidCount,
-            ...(isNowCompleted ? { lastPublishedAt: nowIso, health: 'En ritmo' } : {}),
-          },
-          '',
-        );
+        if (isReelPub) {
+          await handleUpdateClientField(
+            matchingClient.id,
+            {
+              videosPublicadosEstaSemana: nextVidCount,
+              ...(isNowCompleted ? { lastPublishedAt: nowIso, health: 'En ritmo' } : {}),
+            },
+            '',
+          );
+        }
       }
     }
 
@@ -1584,7 +1998,7 @@ export default function AdminDashboard() {
   };
 
   /**
-   * Cambia la dificultad RPG de una Quest (+100 XP Guion | +150 XP Grabación | +200 XP Reel Publicado)
+   * Cambia la dificultad RPG de una Quest
    */
   const handleChangeQuestDifficulty = async (task, nextDiffId) => {
     if (!task) return;
@@ -1607,7 +2021,7 @@ export default function AdminDashboard() {
   };
 
   /**
-   * Publicar una pieza / Restaurar HP al 100% con efecto visual y sonido
+   * Publicar una pieza / Restaurar HP al 100% con registro en el Log de Actividad en Vivo
    */
   const handleQuickMarkAccountPublishedNow = async (client) => {
     if (!client) return;
@@ -1620,9 +2034,20 @@ export default function AdminDashboard() {
     setTimeout(() => setHealedClientFlashId(null), 2600);
     playRpgSound('heal', rpgState.soundEnabled);
 
+    const newLogEntry = {
+      id: `act-${Date.now()}`,
+      player: owner,
+      action: `Reel publicado en ${client.name}`,
+      category: client.name,
+      difficulty: 'Reel Publicado',
+      xp: 200,
+      time: formatExactTime(new Date()),
+      createdAt: nowIso,
+    };
+
     updateRpgState((prev) => ({
       ...prev,
-      [xpKey]: Number(prev[xpKey] || 1000) + 200,
+      [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0)) + 200,
       manualHoursOverride: {
         ...(prev.manualHoursOverride || {}),
         [client.id]: 0,
@@ -1632,6 +2057,7 @@ export default function AdminDashboard() {
         [client.id]: 100,
       },
       bossChestReelsCount: Math.min(12, Number(prev.bossChestReelsCount || 0) + 1),
+      activityLog: [newLogEntry, ...(prev.activityLog || [])].slice(0, 15),
     }));
     showFloatingXp(owner, 200, `+200 XP · Reel Publicado (${client.name})`);
 
@@ -1667,11 +2093,23 @@ export default function AdminDashboard() {
       return;
     }
 
+    const newLogEntry = {
+      id: `act-${Date.now()}`,
+      player,
+      action: 'Check-in 7:30 AM Despegue',
+      category: 'Personal / Hábito',
+      difficulty: 'Hábito Diario',
+      xp: 50,
+      time: formatExactTime(new Date()),
+      createdAt: new Date().toISOString(),
+    };
+
     updateRpgState((prev) => ({
       ...prev,
       [lastKey]: todayDateStr,
-      [streakKey]: Number(prev[streakKey] || 0) + 1,
-      [xpKey]: Number(prev[xpKey] || 1000) + 50,
+      [streakKey]: Math.max(0, Number(prev[streakKey] ?? 0)) + 1,
+      [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0)) + 50,
+      activityLog: [newLogEntry, ...(prev.activityLog || [])].slice(0, 15),
     }));
 
     playRpgSound('xp', rpgState.soundEnabled);
@@ -1680,7 +2118,7 @@ export default function AdminDashboard() {
   };
 
   /**
-   * Creación rápida inline de Quest (sin abrir modales) para Kevin, Marco o Backlog de cliente
+   * Creación rápida inline de Quest (sin abrir modales) para Kevin, Marco o Backlog
    */
   const handleQuickCreateMissionInline = async ({
     title,
@@ -1724,7 +2162,7 @@ export default function AdminDashboard() {
     }
 
     playRpgSound('advance', rpgState.soundEnabled);
-    showToast(`⚔️ Nueva Quest asignada a ${record.assignee} (${record.client})`);
+    showToast(`Nueva Quest asignada a ${record.assignee} (${record.client})`);
   };
 
   /**
@@ -1743,7 +2181,7 @@ export default function AdminDashboard() {
       prev.map((s) => (s.id === task.id ? { ...s, ...updates } : s)),
     );
     playRpgSound('advance', rpgState.soundEnabled);
-    showToast(`⚡ Subida a Quests del Día (${normalizeAssignee(task.assignee)})`);
+    showToast(`Subida a Quests del Día (${normalizeAssignee(task.assignee)})`);
 
     if (isFirebaseConfigured && db && !task.id.startsWith('local-sp-')) {
       try {
@@ -1789,11 +2227,12 @@ export default function AdminDashboard() {
       client: newSprint.client || zendaClients[0]?.name || 'Zenda Agency',
       assignee: normalizeAssignee(newSprint.assignee),
       questDifficulty:
-        newSprint.stage === 'Publicado'
+        newSprint.questDifficulty ||
+        (newSprint.stage === 'Publicado'
           ? 'Reel Publicado'
           : newSprint.stage === 'Grabado'
           ? 'Grabación'
-          : 'Guion',
+          : getDefaultDifficultyForCategory(newSprint.client)),
       questStatus: isPub ? 'Completado' : newSprint.stage === 'Grabado' ? 'En Curso' : 'Pendiente',
       stage: newSprint.stage || 'Guion',
       priority: newSprint.priority,
@@ -1823,6 +2262,7 @@ export default function AdminDashboard() {
       title: '',
       client: zendaClients[0]?.name || 'Zenda Agency',
       assignee: 'Kevin',
+      questDifficulty: 'Guion',
       stage: 'Guion',
       priority: 'Alta',
       deadline: getTodayDate(),
@@ -1986,6 +2426,17 @@ export default function AdminDashboard() {
       setCalendarEvents((prev) => [...prev, { id: `local-cal-${Date.now()}`, ...record }]);
     }
 
+    // Dispara POST JSON ({ title, time, assignedTo }) al Webhook opcional (n8n/WhatsApp) si está configurado
+    sendCalendarWebhookPost({
+      title: record.title,
+      time: record.time,
+      assignedTo: record.assignee,
+      client: record.client,
+      type: record.type,
+      date: record.date,
+      trigger: 'event_scheduled',
+    });
+
     setNewCalendarEvent({
       title: '',
       client: zendaClients[0]?.name || 'Dolciangel',
@@ -1996,7 +2447,7 @@ export default function AdminDashboard() {
       notes: '',
     });
     setCalendarModalOpen(false);
-    showToast('Guardado en Zenda OS');
+    showToast('Evento agendado en Zenda OS');
   };
 
   const handleToggleCalendarCompleted = async (id, currentVal) => {
@@ -2092,12 +2543,17 @@ export default function AdminDashboard() {
   };
 
   // ============================================================================
-  // CÁLCULOS RPG: BARRA DE SALUD (HP -25%/24H), PERFILES KEVIN/MARCO & QUESTS
+  // CÁLCULOS RPG: BARRA DE SALUD (HP -25%/24H), DUELO 1v1, PERFILES & QUESTS
   // ============================================================================
+
+  // Lista unificada de Categorías de Quest (4 Clientes Oficiales + 3 Categorías Personales/Hábitos)
+  const allQuestCategoryOptions = useMemo(() => {
+    const clientNames = zendaClients.map((c) => c.name);
+    return [...clientNames, ...PERSONAL_QUEST_CATEGORIES];
+  }, [zendaClients]);
 
   // 1. BARRA DE SALUD (HP) DE LOS 4 CLIENTES:
   // Empieza con 100% HP al publicar y pierde -25% HP por cada 24h sin publicación nueva.
-  // Verde >60%, Ámbar 30–60%, Rojo Crítico <30% con alerta de 'Cuenta en Peligro'.
   const accountHealthCards = useMemo(() => {
     return zendaClients.map((client) => {
       const accountKey = normalizeAccountKey(client.name);
@@ -2109,7 +2565,11 @@ export default function AdminDashboard() {
       }
 
       for (const sp of sprints) {
-        if (normalizeAccountKey(sp.client) === accountKey && getQuestRpgStatus(sp) === 'Completado') {
+        if (
+          normalizeAccountKey(sp.client) === accountKey &&
+          getQuestRpgStatus(sp) === 'Completado' &&
+          getQuestDifficultyInfo(sp).id === 'Reel Publicado'
+        ) {
           const rawTs = sp.publishedAt || sp.updatedAt || sp.createdAt || sp.deadline;
           const t = rawTs ? Date.parse(rawTs) : NaN;
           if (!Number.isNaN(t)) timestamps.push(t);
@@ -2141,8 +2601,6 @@ export default function AdminDashboard() {
       const computedHours =
         diffMs !== null ? Math.floor(diffMs / (1000 * 60 * 60)) : null;
 
-      // Si hay override manual o timestamp real, calcula horas exactas; si aún no tiene registro,
-      // usa un valor inicial por cuenta para visualizar el sistema o 0h si ya publicó esta semana
       const hasPublishedThisWeek = Number(client.videosPublicadosEstaSemana || 0) > 0;
       const hoursSincePublish =
         overrideHours !== undefined && overrideHours !== null
@@ -2153,14 +2611,9 @@ export default function AdminDashboard() {
           ? 4
           : 76;
 
-      // Fórmula RPG: 100% HP al publicar (0h), pierde -25% HP por cada 24h sin publicación nueva
       const rawDecay = (hoursSincePublish / 24) * 25;
       const hpPercent = Math.max(0, Math.min(100, Math.round(100 - rawDecay)));
 
-      // Estados visuales del HP:
-      // Verde (> 60% HP)
-      // Ámbar (30% - 60% HP)
-      // Rojo Crítico (< 30% HP · Cuenta en Peligro)
       let statusKey = 'red';
       let statusLabel = 'CUENTA EN PELIGRO';
       if (hpPercent > 60) {
@@ -2171,15 +2624,7 @@ export default function AdminDashboard() {
         statusLabel = 'DESGASTE ACTIVO';
       }
 
-      const publishedSprintsForClient = sprints.filter(
-        (sp) =>
-          normalizeAccountKey(sp.client) === accountKey &&
-          getQuestRpgStatus(sp) === 'Completado',
-      ).length;
-      const publishedPieceCount = Math.max(
-        Number(client.videosPublicadosEstaSemana || 0),
-        publishedSprintsForClient,
-      );
+      const publishedPieceCount = Math.max(0, Number(client.videosPublicadosEstaSemana || 0));
 
       return {
         client,
@@ -2233,7 +2678,6 @@ export default function AdminDashboard() {
     const pendingList = mine
       .filter((s) => getQuestRpgStatus(s) !== 'Completado')
       .sort((a, b) => {
-        // Priorizar las que están 'En Curso' arriba
         const aInCourse = getQuestRpgStatus(a) === 'En Curso' ? 0 : 1;
         const bInCourse = getQuestRpgStatus(b) === 'En Curso' ? 0 : 1;
         if (aInCourse !== bInCourse) return aInCourse - bInCourse;
@@ -2248,7 +2692,6 @@ export default function AdminDashboard() {
         return String(a.deadline || '').localeCompare(String(b.deadline || ''));
       });
 
-    // Máximo 3 misiones visibles por jugador en el tablero principal
     const top3 = [...pendingList, ...completedTodayList].slice(0, 3);
     const top3Ids = new Set(top3.map((t) => t.id));
     const remainingBacklog = mine.filter((t) => !top3Ids.has(t.id));
@@ -2281,37 +2724,50 @@ export default function AdminDashboard() {
     return s;
   }, [kevinMissionsData.top3, marcoMissionsData.top3]);
 
-  // 3. PERFILES DE JUGADOR (Nivel, Barra XP y 7:30 AM Despegue entre 7:00 AM y 8:00 AM)
+  // 3. PERFILES DE JUGADOR & MOTOR COMPETITIVO 1v1 (0 XP Base Oficial)
   const currentLocalHour = new Date(nowMs).getHours();
   const isMorningDespegueWindow = currentLocalHour === 7;
 
-  const kevinTotalXP = Number(rpgState.kevinBaseXP || 1200);
+  const kevinTotalXP = Math.max(0, Number(rpgState.kevinBaseXP ?? rpgState.xp?.Kevin ?? 0));
   const kevinLevel = Math.floor(kevinTotalXP / XP_PER_LEVEL) + 1;
   const kevinLevelXP = kevinTotalXP % XP_PER_LEVEL;
   const kevinLevelPercent = Math.round((kevinLevelXP / XP_PER_LEVEL) * 100);
   const kevinCheckedInToday = rpgState.kevinLastCheckIn === todayDateStr;
 
-  const marcoTotalXP = Number(rpgState.marcoBaseXP || 1150);
+  const marcoTotalXP = Math.max(0, Number(rpgState.marcoBaseXP ?? rpgState.xp?.Marco ?? 0));
   const marcoLevel = Math.floor(marcoTotalXP / XP_PER_LEVEL) + 1;
   const marcoLevelXP = marcoTotalXP % XP_PER_LEVEL;
   const marcoLevelPercent = Math.round((marcoLevelXP / XP_PER_LEVEL) * 100);
   const marcoCheckedInToday = rpgState.marcoLastCheckIn === todayDateStr;
 
-  // 4. META SEMANAL (X / 12 Reels Publicados esta semana)
+  // Duelo 1v1 Semanal (Kevin vs Marco)
+  const totalDuelXP = kevinTotalXP + marcoTotalXP;
+  const kevinDuelPercent = totalDuelXP > 0 ? Math.round((kevinTotalXP / totalDuelXP) * 100) : 50;
+  const marcoDuelPercent = totalDuelXP > 0 ? 100 - kevinDuelPercent : 50;
+  const duelLeader =
+    kevinTotalXP > marcoTotalXP
+      ? 'Kevin'
+      : marcoTotalXP > kevinTotalXP
+      ? 'Marco'
+      : null;
+  const duelDiffXP = Math.abs(kevinTotalXP - marcoTotalXP);
+  const recentActivityLog = useMemo(
+    () => (Array.isArray(rpgState.activityLog) ? rpgState.activityLog.slice(0, 5) : []),
+    [rpgState.activityLog],
+  );
+
+  // 4. META SEMANAL (X / 12 Reels Publicados esta semana - Arranca en 0/12 real)
   const weeklyPublishedCount = useMemo(() => {
     const sumByAccounts = accountHealthCards.reduce(
       (acc, card) => acc + card.publishedPieceCount,
       0,
     );
-    const totalPublishedSprints = sprints.filter(
-      (s) => getQuestRpgStatus(s) === 'Completado',
-    ).length;
-    const baseCount = Math.max(sumByAccounts, totalPublishedSprints);
+    const baseCount = Math.max(sumByAccounts, Number(rpgState.bossChestReelsCount || 0));
     return Math.max(
       0,
       Math.min(12, baseCount + Number(rpgState.manualBossReelsBonus || 0)),
     );
-  }, [accountHealthCards, sprints, rpgState.manualBossReelsBonus]);
+  }, [accountHealthCards, rpgState.bossChestReelsCount, rpgState.manualBossReelsBonus]);
 
   const weeklyGoalPercent = Math.min(
     100,
@@ -2319,9 +2775,18 @@ export default function AdminDashboard() {
   );
   const isBossChestUnlocked = weeklyPublishedCount >= WEEKLY_AGENCY_GOAL;
 
-  // 4. BACKLOG COLAPSADO POR CLIENTE (Debajo de las misiones de hoy)
+  // 5. BACKLOG COLAPSADO POR CUENTA Y CATEGORÍAS PERSONALES
   const backlogByClient = useMemo(() => {
-    return zendaClients.map((client) => {
+    const categoryEntries = [
+      ...zendaClients.map((c) => ({ id: c.id, name: c.name, leadOwner: c.leadOwner || 'Kevin' })),
+      ...PERSONAL_QUEST_CATEGORIES.map((catName, idx) => ({
+        id: `personal-cat-${idx}`,
+        name: catName,
+        leadOwner: 'Kevin',
+      })),
+    ];
+
+    return categoryEntries.map((client) => {
       const accountKey = normalizeAccountKey(client.name);
       const allClientTasks = sprints.filter(
         (s) => normalizeAccountKey(s.client) === accountKey,
@@ -2343,20 +2808,12 @@ export default function AdminDashboard() {
         (t) => !activeTop3IdsSet.has(t.id) && getMissionStage(t) !== 'Publicado',
       );
 
-      const stageCounts = {
-        Guion: allClientTasks.filter((t) => getMissionStage(t) === 'Guion').length,
-        Grabado: allClientTasks.filter((t) => getMissionStage(t) === 'Grabado').length,
-        Editado: allClientTasks.filter((t) => getMissionStage(t) === 'Editado').length,
-        Publicado: allClientTasks.filter((t) => getMissionStage(t) === 'Publicado').length,
-      };
-
       return {
         client,
         accountKey,
         allClientTasks,
         filteredTasks,
         pendingBacklogCount: pendingBacklogOnly.length,
-        stageCounts,
       };
     });
   }, [
@@ -2820,12 +3277,30 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Derecha: Acciones discretas */}
-            <div className="hidden items-center gap-2 lg:flex">
+            {/* Derecha: Acciones discretas + Alertas + Configuración */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleEnableBrowserAlerts}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                  notificationPermission === 'granted'
+                    ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
+                    : 'border-[#E2E8F0] bg-white text-[#0F172A] hover:border-[#0066C5] hover:text-[#0066C5]'
+                }`}
+                title="Notificaciones Web Push 15 min antes de eventos y 7:25 AM Despegue"
+              >
+                <Bell className="h-3.5 w-3.5" />
+                <span>
+                  {notificationPermission === 'granted'
+                    ? '🔔 Alertas Activas'
+                    : '🔔 Activar Alertas'}
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setSprintModalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#0052A3]"
+                className="hidden items-center gap-1.5 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#0052A3] lg:inline-flex"
               >
                 <Plus className="h-3.5 w-3.5" />
                 <span>Nueva Quest</span>
@@ -2833,25 +3308,106 @@ export default function AdminDashboard() {
 
               <button
                 type="button"
-                onClick={() =>
-                  updateRpgState((prev) => ({ ...prev, soundEnabled: !prev.soundEnabled }))
-                }
-                className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 font-mono text-[11px] font-medium text-slate-600 hover:bg-[#F8FAFC] hover:text-[#0F172A]"
-                title="Sonido"
+                onClick={() => setSettingsPanelOpen((prev) => !prev)}
+                className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  settingsPanelOpen
+                    ? 'border-[#0066C5] bg-[#0066C5]/10 text-[#0066C5]'
+                    : 'border-[#E2E8F0] bg-white text-slate-600 hover:bg-[#F8FAFC] hover:text-[#0F172A]'
+                }`}
+                title="Configuración: Webhook URL, Sonido y Reiniciar Temporada a 0"
               >
-                {rpgState.soundEnabled ? 'SFX ON' : 'SFX OFF'}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setResetModalOpen(true)}
-                className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-[#F8FAFC] hover:text-[#0F172A]"
-                title="Reiniciar Base"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
+                <Settings className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Configuración</span>
               </button>
             </div>
           </div>
+
+          {/* Panel de Configuración Discreto (Webhook n8n/WhatsApp, Reiniciar Temporada a 0, Sonido y Base) */}
+          <AnimatePresence>
+            {settingsPanelOpen && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.18 }}
+                className="overflow-hidden"
+              >
+                <div className="mt-3 flex flex-col gap-3 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3 lg:flex-row lg:items-center lg:justify-between">
+                  {/* Webhook URL opcional (n8n / WhatsApp) */}
+                  <div className="flex flex-1 flex-col gap-1.5 sm:flex-row sm:items-center">
+                    <label className="shrink-0 font-mono text-[11px] font-semibold text-[#0F172A]">
+                      Webhook URL (n8n / WhatsApp):
+                    </label>
+                    <div className="flex flex-1 gap-2">
+                      <input
+                        type="url"
+                        value={rpgState.webhookUrl || ''}
+                        onChange={(e) =>
+                          updateRpgState({ webhookUrl: e.target.value })
+                        }
+                        placeholder="https://n8n.wearezenda.com/webhook/calendario..."
+                        className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 font-mono text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5]"
+                      />
+                      {rpgState.webhookUrl && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            sendCalendarWebhookPost({
+                              title: 'Prueba de Alerta Zenda OS',
+                              time: formatExactTime(new Date()),
+                              assignedTo: 'Kevin & Marco',
+                              trigger: 'manual_test',
+                            });
+                            showToast('POST JSON enviado al Webhook configurado');
+                          }}
+                          className="shrink-0 rounded-lg border border-[#0066C5] bg-white px-2.5 py-1.5 font-mono text-[11px] font-semibold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
+                        >
+                          Probar POST
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Controles de Temporada y Sistema */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateRpgState((prev) => ({ ...prev, soundEnabled: !prev.soundEnabled }))
+                      }
+                      className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 font-mono text-[11px] font-medium text-slate-600 hover:text-[#0F172A]"
+                    >
+                      {rpgState.soundEnabled ? 'SFX: ON' : 'SFX: OFF'}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isResettingSeason}
+                      onClick={handleResetSeasonToZero}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 font-mono text-[11px] font-semibold text-[#0F172A] transition-colors hover:border-[#0066C5] hover:text-[#0066C5] disabled:opacity-50"
+                      title="Reinicia XP a 0, LVL 1, Racha 0d y 0/12 Reels en Firestore"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      <span>
+                        {isResettingSeason
+                          ? 'Reiniciando...'
+                          : 'Reiniciar Temporada a 0'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setResetModalOpen(true)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 font-mono text-[11px] font-medium text-slate-500 hover:border-[#EF4444]/40 hover:text-[#EF4444]"
+                      title="Purgar colecciones de Firestore"
+                    >
+                      <span>Purgar Base</span>
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </header>
 
         {/* Mobile menu dropdown */}
@@ -2902,7 +3458,7 @@ export default function AdminDashboard() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.18 }}
-                className="space-y-6"
+                className="space-y-5"
               >
                 {/* ============================================================ */}
                 {/* 1. FILA SUPERIOR: 4 CUENTAS COMPACTAS                        */}
@@ -2995,6 +3551,145 @@ export default function AdminDashboard() {
                         </div>
                       );
                     })}
+                  </div>
+                </section>
+
+                {/* ============================================================ */}
+                {/* 2. MOTOR COMPETITIVO 1v1 (DUELO SEMANAL KEVIN VS MARCO)      */}
+                {/* Barra comparativa de XP, 👑 Líder Actual y Log en Vivo (Top 5) */}
+                {/* ============================================================ */}
+                <section
+                  aria-label="Duelo Semanal 1v1 Kevin vs Marco y Log de Actividad"
+                  className="rounded-2xl border border-[#E2E8F0] bg-[#FFFFFF] p-4 shadow-sm"
+                >
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-center">
+                    {/* Izquierda: Marcador 1v1 + Barra Comparativa de XP */}
+                    <div className="space-y-2.5 lg:col-span-7 lg:border-r lg:border-[#E2E8F0] lg:pr-5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold uppercase tracking-wider text-[#0F172A]">
+                            Duelo Semanal 1v1
+                          </span>
+                          {duelLeader ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-[#10B981]/30 bg-[#10B981]/10 px-2.5 py-0.5 font-mono text-[11px] font-bold text-[#10B981]">
+                              <Crown className="h-3 w-3" />
+                              <span>👑 Líder Actual: {duelLeader} (+{duelDiffXP} XP)</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-0.5 font-mono text-[11px] font-semibold text-slate-600">
+                              <span>Empate ({kevinTotalXP} - {marcoTotalXP} XP)</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={isResettingSeason}
+                          onClick={handleResetSeasonToZero}
+                          className="inline-flex items-center gap-1 rounded-md border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-500 transition-colors hover:border-[#0066C5] hover:text-[#0066C5]"
+                          title="Reiniciar temporada competitiva a 0 XP"
+                        >
+                          <RotateCcw className="h-2.5 w-2.5" />
+                          <span>Reiniciar Temporada a 0</span>
+                        </button>
+                      </div>
+
+                      {/* Marcadores Jugadores */}
+                      <div className="flex items-center justify-between font-mono text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full bg-[#0066C5]" />
+                          <span className="font-bold text-[#0F172A]">Kevin</span>
+                          <span className="font-semibold text-[#0066C5]">
+                            {kevinTotalXP.toLocaleString()} XP
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            (LVL {kevinLevel} · {kevinDuelPercent}%)
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-slate-400">
+                            ({marcoDuelPercent}% · LVL {marcoLevel})
+                          </span>
+                          <span className="font-semibold text-[#0F172A]">
+                            {marcoTotalXP.toLocaleString()} XP
+                          </span>
+                          <span className="font-bold text-[#0F172A]">Marco</span>
+                          <span className="h-2 w-2 rounded-full bg-[#0F172A]" />
+                        </div>
+                      </div>
+
+                      {/* Barra Comparativa 1v1 en tiempo real */}
+                      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-[#F8FAFC] ring-1 ring-[#E2E8F0]">
+                        <motion.div
+                          initial={{ width: '50%' }}
+                          animate={{ width: `${kevinDuelPercent}%` }}
+                          transition={{ duration: 0.45, ease: 'easeOut' }}
+                          className="h-full bg-[#0066C5]"
+                          title={`Kevin: ${kevinTotalXP} XP (${kevinDuelPercent}%)`}
+                        />
+                        <motion.div
+                          initial={{ width: '50%' }}
+                          animate={{ width: `${marcoDuelPercent}%` }}
+                          transition={{ duration: 0.45, ease: 'easeOut' }}
+                          className="h-full bg-[#0F172A]"
+                          title={`Marco: ${marcoTotalXP} XP (${marcoDuelPercent}%)`}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Derecha: Log de Actividad en Vivo (Últimas 5 acciones completadas con hora exacta) */}
+                    <div className="lg:col-span-5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          Log de Actividad en Vivo (Últimas 5)
+                        </span>
+                        <span className="font-mono text-[10px] text-[#10B981]">
+                          ● Tiempo Real
+                        </span>
+                      </div>
+
+                      {recentActivityLog.length === 0 ? (
+                        <p className="mt-2 rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-center font-mono text-[11px] text-slate-400">
+                          Temporada en 0 XP. Completa la primera Quest para inaugurar el marcador.
+                        </p>
+                      ) : (
+                        <div className="mt-1.5 space-y-1">
+                          {recentActivityLog.map((entry) => (
+                            <div
+                              key={entry.id}
+                              className="flex items-center justify-between gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-[11px]"
+                            >
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span className="shrink-0 font-mono text-[10px] text-slate-400">
+                                  {entry.time}
+                                </span>
+                                <span
+                                  className={`shrink-0 font-mono font-bold ${
+                                    entry.player === 'Kevin'
+                                      ? 'text-[#0066C5]'
+                                      : 'text-[#0F172A]'
+                                  }`}
+                                >
+                                  {entry.player}
+                                </span>
+                                <span className="truncate font-medium text-[#0F172A]">
+                                  {entry.action}
+                                </span>
+                                {entry.category && (
+                                  <span className="hidden shrink-0 rounded bg-white px-1.5 py-0.5 font-mono text-[9px] text-slate-500 ring-1 ring-[#E2E8F0] sm:inline">
+                                    {entry.category}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="shrink-0 font-mono text-[10px] font-bold text-[#10B981]">
+                                +{entry.xp} XP
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </section>
 
@@ -3142,19 +3837,31 @@ export default function AdminDashboard() {
                               <div className="grid grid-cols-2 gap-2">
                                 <select
                                   value={hunter.quickForm.client}
-                                  onChange={(e) =>
+                                  onChange={(e) => {
+                                    const nextCategory = e.target.value;
                                     hunter.setQuickForm({
                                       ...hunter.quickForm,
-                                      client: e.target.value,
-                                    })
-                                  }
+                                      client: nextCategory,
+                                      questDifficulty:
+                                        getDefaultDifficultyForCategory(nextCategory),
+                                    });
+                                  }}
                                   className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5]"
                                 >
-                                  {zendaClients.map((c) => (
-                                    <option key={c.id} value={c.name}>
-                                      {c.name}
-                                    </option>
-                                  ))}
+                                  <optgroup label="Clientes Oficiales">
+                                    {zendaClients.map((c) => (
+                                      <option key={c.id} value={c.name}>
+                                        {c.name}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                  <optgroup label="Personal & Hábitos">
+                                    {PERSONAL_QUEST_CATEGORIES.map((cat) => (
+                                      <option key={cat} value={cat}>
+                                        {cat}
+                                      </option>
+                                    ))}
+                                  </optgroup>
                                 </select>
 
                                 <select
@@ -3167,11 +3874,24 @@ export default function AdminDashboard() {
                                   }
                                   className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 font-mono text-xs font-semibold text-[#0066C5] outline-none focus:border-[#0066C5]"
                                 >
-                                  {QUEST_DIFFICULTIES.map((d) => (
-                                    <option key={d.id} value={d.id}>
-                                      {d.badgeLabel}
-                                    </option>
-                                  ))}
+                                  <optgroup label="Clientes & Contenido">
+                                    {QUEST_DIFFICULTIES.filter((d) => d.group === 'client').map(
+                                      (d) => (
+                                        <option key={d.id} value={d.id}>
+                                          {d.badgeLabel}
+                                        </option>
+                                      ),
+                                    )}
+                                  </optgroup>
+                                  <optgroup label="Personal & Hábitos">
+                                    {QUEST_DIFFICULTIES.filter((d) => d.group === 'personal').map(
+                                      (d) => (
+                                        <option key={d.id} value={d.id}>
+                                          {d.badgeLabel}
+                                        </option>
+                                      ),
+                                    )}
+                                  </optgroup>
                                 </select>
                               </div>
 
@@ -4900,24 +5620,41 @@ export default function AdminDashboard() {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.98, y: -8 }}
                 transition={{ duration: 0.22 }}
-                className="space-y-8"
+                className="space-y-6"
               >
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="flex items-center gap-2">
-                      <CalendarIcon className="h-5 w-5 text-cyan-600" />
+                      <CalendarIcon className="h-5 w-5 text-[#0066C5]" />
                       <h2 className="text-lg font-bold text-[#0F172A]">Calendario & Rodajes Operativos</h2>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      Rodajes presenciales, entregas y cobros sincronizados con <code className="font-semibold text-slate-800">zenda_calendar</code>.
+                      Alertas nativas 15 min antes de cada evento y a las 7:25 AM para el Despegue.
                     </p>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleEnableBrowserAlerts}
+                      className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 font-mono text-xs font-semibold transition-colors ${
+                        notificationPermission === 'granted'
+                          ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
+                          : 'border-[#E2E8F0] bg-white text-[#0F172A] hover:border-[#0066C5] hover:text-[#0066C5]'
+                      }`}
+                    >
+                      <Bell className="h-3.5 w-3.5" />
+                      <span>
+                        {notificationPermission === 'granted'
+                          ? '🔔 Alertas Activas (15m / 7:25 AM)'
+                          : '🔔 Activar Alertas'}
+                      </span>
+                    </button>
+
                     <select
                       value={calendarClientFilter}
                       onChange={(e) => setCalendarClientFilter(e.target.value)}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs font-medium text-slate-700 shadow-sm outline-none focus:border-slate-900"
+                      className="rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 font-mono text-xs font-medium text-slate-700 shadow-sm outline-none focus:border-[#0066C5]"
                     >
                       <option value="all">Todos los clientes</option>
                       {zendaClients.map((c) => (
@@ -4933,12 +5670,45 @@ export default function AdminDashboard() {
                       whileTap={{ scale: 0.96 }}
                       transition={SPRING_TRANSITION}
                       onClick={() => setCalendarModalOpen(true)}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 py-2 font-mono text-xs font-bold tracking-wider text-white shadow-sm hover:bg-slate-800"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#0066C5] px-4 py-2 font-mono text-xs font-bold tracking-wider text-white shadow-sm hover:bg-[#0052A3]"
                     >
                       <Plus className="h-4 w-4" />
                       + NUEVO EVENTO
                     </motion.button>
                   </div>
+                </div>
+
+                {/* Barra compacta de Webhook URL (n8n / WhatsApp) para alertas de calendario */}
+                <div className="flex flex-col gap-2 rounded-xl border border-[#E2E8F0] bg-white p-3.5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                    <span className="shrink-0 font-mono text-xs font-semibold text-[#0F172A]">
+                      Webhook URL (n8n / WhatsApp):
+                    </span>
+                    <input
+                      type="url"
+                      value={rpgState.webhookUrl || ''}
+                      onChange={(e) => updateRpgState({ webhookUrl: e.target.value })}
+                      placeholder="https://n8n.wearezenda.com/webhook/calendario (POST JSON: { title, time, assignedTo })"
+                      className="flex-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 font-mono text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5] focus:bg-white"
+                    />
+                  </div>
+                  {rpgState.webhookUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sendCalendarWebhookPost({
+                          title: 'Test de Alerta Calendario Zenda',
+                          time: formatExactTime(new Date()),
+                          assignedTo: 'Kevin & Marco',
+                          trigger: 'calendar_test',
+                        });
+                        showToast('POST JSON enviado al Webhook');
+                      }}
+                      className="shrink-0 rounded-lg border border-[#0066C5] bg-white px-3 py-1.5 font-mono text-xs font-semibold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
+                    >
+                      Probar Webhook
+                    </button>
+                  )}
                 </div>
 
                 {/* Filtro por tipo de evento */}
@@ -5878,16 +6648,23 @@ export default function AdminDashboard() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                      Cuenta Asociada
+                      Categoría / Cuenta
                     </label>
                     <select
                       value={newSprint.client}
-                      onChange={(e) => setNewSprint({ ...newSprint, client: e.target.value })}
+                      onChange={(e) => {
+                        const nextCat = e.target.value;
+                        setNewSprint({
+                          ...newSprint,
+                          client: nextCat,
+                          questDifficulty: getDefaultDifficultyForCategory(nextCat),
+                        });
+                      }}
                       className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
                     >
-                      {zendaClients.map((c) => (
-                        <option key={c.id} value={c.name}>
-                          {c.name}
+                      {allQuestCategoryOptions.map((catName) => (
+                        <option key={catName} value={catName}>
+                          {catName}
                         </option>
                       ))}
                     </select>
@@ -5895,16 +6672,18 @@ export default function AdminDashboard() {
 
                   <div>
                     <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                      Etapa Inicial
+                      Dificultad / Tipo XP
                     </label>
                     <select
-                      value={newSprint.stage || 'Guion'}
-                      onChange={(e) => setNewSprint({ ...newSprint, stage: e.target.value })}
+                      value={newSprint.questDifficulty || 'Guion'}
+                      onChange={(e) =>
+                        setNewSprint({ ...newSprint, questDifficulty: e.target.value })
+                      }
                       className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
                     >
-                      {MISSION_STAGES.map((st) => (
-                        <option key={st} value={st}>
-                          {st}
+                      {QUEST_DIFFICULTIES.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.badgeLabel}
                         </option>
                       ))}
                     </select>
