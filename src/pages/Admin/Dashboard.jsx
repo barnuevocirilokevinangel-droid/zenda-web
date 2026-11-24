@@ -6,7 +6,6 @@ import {
   ArrowDownRight,
   ArrowLeft,
   ArrowUpRight,
-  Bell,
   Building2,
   Calendar as CalendarIcon,
   Check,
@@ -19,7 +18,6 @@ import {
   Code2,
   Copy,
   CreditCard,
-  Crown,
   ExternalLink,
   Eye,
   FileText,
@@ -53,6 +51,34 @@ const QUEST_STATES = ['Pendiente', 'En Curso', 'Completado'];
 const WEEKLY_AGENCY_GOAL = 12;
 const XP_PER_LEVEL = 500;
 const CURRENT_SEASON_VERSION = 'official_zero_v1';
+const QUICK_XP_PRESETS = [50, 100, 150, 250, 500];
+
+const DEFAULT_SOCIAL_METRICS = {
+  tiktokFollowers: 0,
+  tiktokGoal: 0,
+  tiktokWeeklyDelta: 0,
+  instagramFollowers: 0,
+  instagramGoal: 0,
+  instagramWeeklyDelta: 0,
+  facebookFollowers: 0,
+  facebookGoal: 0,
+  facebookWeeklyDelta: 0,
+  reelViews: 0,
+  avgReach: 0,
+  engagementRate: 0,
+  whatsappClicks: 0,
+  bestReelTitle: '',
+  bestReelViews: 0,
+  bestReelUrl: '',
+  updatedAt: '',
+};
+
+function getClientSocialMetrics(client) {
+  return {
+    ...DEFAULT_SOCIAL_METRICS,
+    ...(client?.socialMetrics || {}),
+  };
+}
 
 // Categorías adicionales para Misiones Personales, Hábitos y Operación Interna
 const PERSONAL_QUEST_CATEGORIES = [
@@ -245,31 +271,48 @@ function normalizeAssignee(rawAssignee) {
 }
 
 /**
- * Obtiene la dificultad RPG de una misión:
- * - Clientes: +100 XP Guion, +150 XP Grabación, +200 XP Reel Publicado
- * - Personales: +50 XP Hábito Diario, +100 XP Tarea Personal / Estudio, +150 XP Entreno / Bloque Profundo
+ * Obtiene la dificultad y el XP RPG de una misión:
+ * - Si la tarea tiene 'customXp' (XP libre asignado por Kevin o Marco), usa ese valor exacto.
+ * - De lo contrario usa los presets de dificultad.
  */
 function getQuestDifficultyInfo(task) {
   const exactMatch = QUEST_DIFFICULTIES.find((d) => d.id === task?.questDifficulty);
-  if (exactMatch) return exactMatch;
-
   const raw = String(task?.questDifficulty || task?.stage || '').toLowerCase();
-  if (raw.includes('hábito') || raw.includes('habito')) {
-    return QUEST_DIFFICULTIES[3]; // +50 XP · Hábito Diario
+
+  let basePreset = QUEST_DIFFICULTIES[0];
+  if (exactMatch) {
+    basePreset = exactMatch;
+  } else if (raw.includes('hábito') || raw.includes('habito')) {
+    basePreset = QUEST_DIFFICULTIES[3]; // +50 XP · Hábito Diario
+  } else if (raw.includes('tarea personal') || raw.includes('estudio')) {
+    basePreset = QUEST_DIFFICULTIES[4]; // +100 XP · Tarea Personal / Estudio
+  } else if (raw.includes('entreno') || raw.includes('bloque profundo')) {
+    basePreset = QUEST_DIFFICULTIES[5]; // +150 XP · Entreno / Bloque Profundo
+  } else if (raw.includes('reel') || raw.includes('publicado')) {
+    basePreset = QUEST_DIFFICULTIES[2]; // +200 XP · Reel Publicado
+  } else if (raw.includes('grab')) {
+    basePreset = QUEST_DIFFICULTIES[1]; // +150 XP · Grabación
   }
-  if (raw.includes('tarea personal') || raw.includes('estudio')) {
-    return QUEST_DIFFICULTIES[4]; // +100 XP · Tarea Personal / Estudio
+
+  const parsedCustomXp = Number(task?.customXp);
+  if (!Number.isNaN(parsedCustomXp) && parsedCustomXp > 0) {
+    const labelText = task?.questDifficulty || basePreset.label || 'Reto';
+    return {
+      ...basePreset,
+      id: labelText,
+      label: labelText,
+      xp: parsedCustomXp,
+      badgeLabel: `+${parsedCustomXp} XP`,
+      colorClass:
+        parsedCustomXp >= 200
+          ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
+          : parsedCustomXp >= 100
+          ? 'border-[#0066C5]/25 bg-[#0066C5]/10 text-[#0066C5]'
+          : 'border-[#E2E8F0] bg-[#F8FAFC] text-slate-700',
+    };
   }
-  if (raw.includes('entreno') || raw.includes('bloque profundo')) {
-    return QUEST_DIFFICULTIES[5]; // +150 XP · Entreno / Bloque Profundo
-  }
-  if (raw.includes('reel') || raw.includes('publicado')) {
-    return QUEST_DIFFICULTIES[2]; // +200 XP · Reel Publicado
-  }
-  if (raw.includes('grab')) {
-    return QUEST_DIFFICULTIES[1]; // +150 XP · Grabación
-  }
-  return QUEST_DIFFICULTIES[0]; // +100 XP · Guion
+
+  return basePreset;
 }
 
 /**
@@ -341,6 +384,7 @@ const OFFICIAL_INITIAL_CLIENTS = [
     firebaseProjectId: 'zenda-db5d0',
     n8nBotNumber: '',
     techNotes: '',
+    socialMetrics: DEFAULT_SOCIAL_METRICS,
     createdAt: '2026-11-01T08:00:00.000Z',
   },
   {
@@ -368,6 +412,7 @@ const OFFICIAL_INITIAL_CLIENTS = [
     firebaseProjectId: '',
     n8nBotNumber: '',
     techNotes: '',
+    socialMetrics: DEFAULT_SOCIAL_METRICS,
     createdAt: '2026-11-01T10:00:00.000Z',
   },
   {
@@ -395,6 +440,7 @@ const OFFICIAL_INITIAL_CLIENTS = [
     firebaseProjectId: '',
     n8nBotNumber: '',
     techNotes: '',
+    socialMetrics: DEFAULT_SOCIAL_METRICS,
     createdAt: '2026-11-02T10:00:00.000Z',
   },
   {
@@ -422,6 +468,7 @@ const OFFICIAL_INITIAL_CLIENTS = [
     firebaseProjectId: '',
     n8nBotNumber: '',
     techNotes: '',
+    socialMetrics: DEFAULT_SOCIAL_METRICS,
     createdAt: '2026-11-03T10:00:00.000Z',
   },
 ];
@@ -513,14 +560,18 @@ export default function AdminDashboard() {
     title: '',
     client: 'Zenda Agency',
     questDifficulty: 'Guion',
+    customXp: 100,
     priority: 'Urgente',
   });
   const [quickMissionMarco, setQuickMissionMarco] = useState({
     title: '',
     client: 'Dolciangel',
     questDifficulty: 'Grabación',
+    customXp: 150,
     priority: 'Urgente',
   });
+  const [addingCustomCategoryFor, setAddingCustomCategoryFor] = useState(null); // null | 'Kevin' | 'Marco' | 'modal'
+  const [customCategoryDraft, setCustomCategoryDraft] = useState('');
   const [expandedBacklogClients, setExpandedBacklogClients] = useState({});
   const [backlogAssigneeFilter, setBacklogAssigneeFilter] = useState('all'); // 'all' | 'Kevin' | 'Marco'
   const [backlogSearchQuery, setBacklogSearchQuery] = useState('');
@@ -528,6 +579,30 @@ export default function AdminDashboard() {
   const [celebrationBurst, setCelebrationBurst] = useState(false);
   const [healedClientFlashId, setHealedClientFlashId] = useState(null);
   const [floatingXpPopup, setFloatingXpPopup] = useState(null); // { player: 'Kevin' | 'Marco', amount: 150, label: '+150 XP' }
+
+  // Pestañas inferiores: 'active' (Misiones Activas) | 'history' (Historial de Victorias & Publicaciones)
+  const [bottomSectionTab, setBottomSectionTab] = useState('active');
+  const [historyPlayerFilter, setHistoryPlayerFilter] = useState('all'); // 'all' | 'Kevin' | 'Marco'
+  const [historyTypeFilter, setHistoryTypeFilter] = useState('all'); // 'all' | 'reel' | 'quest'
+
+  // Mini-modal Anti-Trampa para '+ Publicar' en las 4 cuentas
+  const [publishModalClient, setPublishModalClient] = useState(null);
+  const [publishForm, setPublishForm] = useState({
+    player: 'Kevin',
+    title: '',
+    link: '',
+  });
+
+  // Mini-modal de Penalización Competitiva 1v1 (-100 XP)
+  const [penaltyModalOpen, setPenaltyModalOpen] = useState(false);
+  const [penaltyForm, setPenaltyForm] = useState({
+    player: 'Kevin',
+    reason: 'Incumplimiento / Quedarse dormido',
+  });
+
+  // Modal de Perfil 360° & Métricas Reales de Redes (TikTok, IG, FB, Reels, WhatsApp)
+  const [metricsModalClientId, setMetricsModalClientId] = useState(null);
+  const [metricsDraft, setMetricsDraft] = useState(DEFAULT_SOCIAL_METRICS);
 
   // Estado RPG Oficial (Temporada 0 XP) sincronizado en tiempo real con Firestore ('zenda_system/rpg_state')
   // manteniendo localStorage ('zenda_rpg_os_v2') únicamente como caché rápida de arranque
@@ -554,10 +629,13 @@ export default function AdminDashboard() {
       level: { Kevin: 1, Marco: 1 },
       streak: { Kevin: 0, Marco: 0 },
       clientsHp: defaultClientHp,
+      clientLastPublishedMap: {},
       weeklyReels: 0,
       weeklyReward: 'Cena Libre + Tarde Libre de Socios',
       quests: [],
       activityLog: [],
+      history: [],
+      customCategories: [],
       webhookUrl: '',
       kevinBaseXP: 0,
       marcoBaseXP: 0,
@@ -609,8 +687,11 @@ export default function AdminDashboard() {
         },
         streak: { Kevin: kevinStrk, Marco: marcoStrk },
         clientsHp: parsed.clientsHp || parsed.clientHpMap || defaults.clientsHp,
+        clientLastPublishedMap: parsed.clientLastPublishedMap || {},
         weeklyReward: parsed.weeklyReward || parsed.weeklyRewardText || defaults.weeklyReward,
         activityLog: Array.isArray(parsed.activityLog) ? parsed.activityLog : [],
+        history: Array.isArray(parsed.history) ? parsed.history : [],
+        customCategories: Array.isArray(parsed.customCategories) ? parsed.customCategories : [],
         webhookUrl: parsed.webhookUrl || '',
       };
     } catch {
@@ -672,6 +753,10 @@ export default function AdminDashboard() {
         ...(partial.clientHpMap || {}),
         ...(partial.clientsHp || {}),
       };
+      const mergedLastPubMap = {
+        ...(prev.clientLastPublishedMap || {}),
+        ...(partial.clientLastPublishedMap || {}),
+      };
       const reelsCount = Math.max(
         0,
         Number(partial.weeklyReels ?? partial.bossChestReelsCount ?? prev.bossChestReelsCount ?? 0),
@@ -680,6 +765,16 @@ export default function AdminDashboard() {
         ? partial.activityLog.slice(0, 15)
         : Array.isArray(prev.activityLog)
         ? prev.activityLog.slice(0, 15)
+        : [];
+      const nextHistory = Array.isArray(partial.history)
+        ? partial.history.slice(0, 200)
+        : Array.isArray(prev.history)
+        ? prev.history.slice(0, 200)
+        : [];
+      const nextCustomCategories = Array.isArray(partial.customCategories)
+        ? partial.customCategories
+        : Array.isArray(prev.customCategories)
+        ? prev.customCategories
         : [];
       const nextWebhookUrl =
         partial.webhookUrl !== undefined ? partial.webhookUrl : prev.webhookUrl || '';
@@ -698,12 +793,15 @@ export default function AdminDashboard() {
         weeklyReward: rewardStr,
         clientHpMap: mergedHp,
         clientsHp: mergedHp,
+        clientLastPublishedMap: mergedLastPubMap,
         weeklyReels: reelsCount,
         bossChestReelsCount: reelsCount,
         xp: { Kevin: kevinXP, Marco: marcoXP },
         level: { Kevin: kevinLvl, Marco: marcoLvl },
         streak: { Kevin: kevinStrk, Marco: marcoStrk },
         activityLog: nextActivityLog,
+        history: nextHistory,
+        customCategories: nextCustomCategories,
         webhookUrl: nextWebhookUrl,
         quests: Array.isArray(partial.quests)
           ? partial.quests
@@ -724,7 +822,7 @@ export default function AdminDashboard() {
 
   // Estado de Clientes 360°
   const [selectedClient360Id, setSelectedClient360Id] = useState(null);
-  const [client360Tab, setClient360Tab] = useState('finances'); // 'finances' | 'scripts' | 'infra' | 'dossier'
+  const [client360Tab, setClient360Tab] = useState('metrics'); // 'metrics' | 'finances' | 'scripts' | 'infra' | 'dossier'
   const [activeScriptId, setActiveScriptId] = useState(null);
   const [toastMessage, setToastMessage] = useState('');
 
@@ -770,6 +868,7 @@ export default function AdminDashboard() {
     client: 'Zenda Agency',
     assignee: 'Kevin',
     questDifficulty: 'Guion',
+    customXp: 100,
     stage: 'Guion',
     priority: 'Alta',
     deadline: getTodayDate(),
@@ -1148,6 +1247,16 @@ export default function AdminDashboard() {
                     activityLog: Array.isArray(cloudData.activityLog)
                       ? cloudData.activityLog
                       : prev.activityLog || [],
+                    history: Array.isArray(cloudData.history)
+                      ? cloudData.history
+                      : prev.history || [],
+                    customCategories: Array.isArray(cloudData.customCategories)
+                      ? cloudData.customCategories
+                      : prev.customCategories || [],
+                    clientLastPublishedMap: {
+                      ...(prev.clientLastPublishedMap || {}),
+                      ...(cloudData.clientLastPublishedMap || {}),
+                    },
                     webhookUrl:
                       cloudData.webhookUrl !== undefined
                         ? cloudData.webhookUrl
@@ -1838,7 +1947,7 @@ export default function AdminDashboard() {
   /**
    * Avanza una Quest del Día en 1 clic:
    * Pendiente → En Curso → Completado
-   * Suma XP en vivo (+50 / +100 / +150 / +200 XP), registra en el Log de Actividad en Vivo,
+   * Suma el XP asignado (libre o preset), registra en el Log de Actividad en Vivo y en la Bóveda (history),
    * restaura HP del cliente al 100% si es cuenta de cliente y dispara confeti al cerrar las 3 misiones diarias.
    */
   const handleAdvanceQuestRpgState = async (task, explicitRpgStatus = null) => {
@@ -1890,9 +1999,10 @@ export default function AdminDashboard() {
     setSprints(nextQuestsList);
     setNowMs(Date.now());
 
-    // Actualizar XP del jugador en vivo, registrar en Log de Actividad y sincronizar en zenda_system/rpg_state
+    // Actualizar XP del jugador en vivo, registrar en Log de Actividad + Historial permanente en zenda_system/rpg_state
     if (isNowCompleted && !wasCompleted) {
       const xpKey = assignee === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
+      const exactTimeStr = formatExactTime(new Date());
       const newLogEntry = {
         id: `act-${Date.now()}`,
         player: assignee,
@@ -1900,7 +2010,20 @@ export default function AdminDashboard() {
         category: task.client || 'Zenda Agency',
         difficulty: diffInfo.label,
         xp: diffInfo.xp,
-        time: formatExactTime(new Date()),
+        time: exactTimeStr,
+        createdAt: nowIso,
+      };
+      const newHistoryEntry = {
+        id: `hist-${Date.now()}`,
+        questId: task.id,
+        type: diffInfo.id === 'Reel Publicado' ? 'reel' : 'quest',
+        player: assignee,
+        account: task.client || 'Zenda Agency',
+        title: task.title,
+        link: task.link || '',
+        xp: diffInfo.xp,
+        date: todayDateStr,
+        time: exactTimeStr,
         createdAt: nowIso,
       };
       updateRpgState((prev) => ({
@@ -1908,8 +2031,9 @@ export default function AdminDashboard() {
         [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0)) + diffInfo.xp,
         quests: nextQuestsList,
         activityLog: [newLogEntry, ...(prev.activityLog || [])].slice(0, 15),
+        history: [newHistoryEntry, ...(prev.history || [])].slice(0, 200),
       }));
-      showFloatingXp(assignee, diffInfo.xp, `+${diffInfo.xp} XP · ${diffInfo.label}`);
+      showFloatingXp(assignee, diffInfo.xp, `+${diffInfo.xp} XP · ${task.client || diffInfo.label}`);
 
       const newDoneCount = playerCompletedBefore + 1;
       if (newDoneCount >= 3) {
@@ -1918,7 +2042,7 @@ export default function AdminDashboard() {
         showToast(`¡${assignee} completó sus 3 Quests del Día! (+${diffInfo.xp} XP)`);
       } else {
         playRpgSound('xp', rpgState.soundEnabled);
-        showToast(`Quest Completada por ${assignee}: +${diffInfo.xp} XP (${diffInfo.label})`);
+        showToast(`Quest Completada por ${assignee}: +${diffInfo.xp} XP`);
       }
     } else if (!isNowCompleted && wasCompleted) {
       const xpKey = assignee === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
@@ -1959,6 +2083,10 @@ export default function AdminDashboard() {
               ...(prev.manualHoursOverride || {}),
               [matchingClient.id]: 0,
             },
+            clientLastPublishedMap: {
+              ...(prev.clientLastPublishedMap || {}),
+              [matchingClient.id]: nowIso,
+            },
             clientHpMap: {
               ...(prev.clientHpMap || {}),
               [matchingClient.id]: 100,
@@ -1998,37 +2126,87 @@ export default function AdminDashboard() {
   };
 
   /**
-   * Cambia la dificultad RPG de una Quest
+   * Cambia el XP libre (customXp) de una Quest activa
    */
-  const handleChangeQuestDifficulty = async (task, nextDiffId) => {
+  const handleChangeQuestCustomXp = async (task, newXpValue) => {
     if (!task) return;
+    const parsedXp = Math.max(10, Number(newXpValue) || 100);
     const nextList = sprints.map((s) =>
-      s.id === task.id ? { ...s, questDifficulty: nextDiffId } : s,
+      s.id === task.id ? { ...s, customXp: parsedXp } : s,
     );
     setSprints(nextList);
     updateRpgState((prev) => ({ ...prev, quests: nextList }));
-    const info = QUEST_DIFFICULTIES.find((d) => d.id === nextDiffId) || QUEST_DIFFICULTIES[0];
-    showToast(`Clase de Quest: ${info.badgeLabel}`);
+    showToast(`Recompensa de Quest actualizada: +${parsedXp} XP`);
 
     if (isFirebaseConfigured && db && !task.id.startsWith('local-sp-')) {
       try {
         const { doc, updateDoc } = await import('firebase/firestore');
-        await updateDoc(doc(db, 'zenda_sprints', task.id), { questDifficulty: nextDiffId });
+        await updateDoc(doc(db, 'zenda_sprints', task.id), { customXp: parsedXp });
       } catch (err) {
-        console.warn('[Firestore] Error cambiando dificultad de quest:', err);
+        console.warn('[Firestore] Error actualizando customXp de quest:', err);
       }
     }
   };
 
   /**
-   * Publicar una pieza / Restaurar HP al 100% con registro en el Log de Actividad en Vivo
+   * Crea una nueva categoría personalizada y la guarda en zenda_system/rpg_state
    */
-  const handleQuickMarkAccountPublishedNow = async (client) => {
+  const handleCreateCustomCategory = (targetContext) => {
+    const cleanName = customCategoryDraft.trim();
+    if (!cleanName) return;
+
+    const existingList = Array.isArray(rpgState.customCategories)
+      ? rpgState.customCategories
+      : [];
+    const nextCustomList = existingList.includes(cleanName)
+      ? existingList
+      : [...existingList, cleanName];
+
+    updateRpgState({ customCategories: nextCustomList });
+
+    if (targetContext === 'Kevin') {
+      setQuickMissionKevin((prev) => ({ ...prev, client: cleanName }));
+    } else if (targetContext === 'Marco') {
+      setQuickMissionMarco((prev) => ({ ...prev, client: cleanName }));
+    } else if (targetContext === 'modal') {
+      setNewSprint((prev) => ({ ...prev, client: cleanName }));
+    }
+
+    setCustomCategoryDraft('');
+    setAddingCustomCategoryFor(null);
+    showToast(`Categoría "${cleanName}" creada en Zenda OS`);
+  };
+
+  /**
+   * Abre el mini-modal Anti-Trampa al pulsar '+ Publicar' en una de las 4 cuentas
+   */
+  const handleOpenPublishModal = (client) => {
     if (!client) return;
+    setPublishModalClient(client);
+    setPublishForm({
+      player: normalizeAssignee(client.leadOwner || 'Kevin'),
+      title: '',
+      link: '',
+    });
+  };
+
+  /**
+   * Confirmar Publicación Anti-Trampa:
+   * Restaura HP al 100%, suma +200 XP al jugador elegido, sube la Meta Semanal (X/12)
+   * y guarda el registro permanente en Firestore (zenda_system/rpg_state.history).
+   */
+  const handleConfirmAntiCheatPublish = async (e) => {
+    e.preventDefault();
+    if (!publishModalClient || !publishForm.title.trim()) return;
+
+    const client = publishModalClient;
+    const chosenPlayer = normalizeAssignee(publishForm.player);
+    const reelTitle = publishForm.title.trim();
+    const reelLink = publishForm.link.trim();
     const nowIso = new Date().toISOString();
+    const exactTimeStr = formatExactTime(new Date());
     const nextVidCount = Number(client.videosPublicadosEstaSemana || 0) + 1;
-    const owner = normalizeAssignee(client.leadOwner || 'Kevin');
-    const xpKey = owner === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
+    const xpKey = chosenPlayer === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
 
     setHealedClientFlashId(client.id);
     setTimeout(() => setHealedClientFlashId(null), 2600);
@@ -2036,12 +2214,26 @@ export default function AdminDashboard() {
 
     const newLogEntry = {
       id: `act-${Date.now()}`,
-      player: owner,
-      action: `Reel publicado en ${client.name}`,
+      player: chosenPlayer,
+      action: `Reel: ${reelTitle}`,
       category: client.name,
       difficulty: 'Reel Publicado',
+      link: reelLink,
       xp: 200,
-      time: formatExactTime(new Date()),
+      time: exactTimeStr,
+      createdAt: nowIso,
+    };
+
+    const newHistoryEntry = {
+      id: `hist-${Date.now()}`,
+      type: 'reel',
+      player: chosenPlayer,
+      account: client.name,
+      title: reelTitle,
+      link: reelLink,
+      xp: 200,
+      date: todayDateStr,
+      time: exactTimeStr,
       createdAt: nowIso,
     };
 
@@ -2052,14 +2244,20 @@ export default function AdminDashboard() {
         ...(prev.manualHoursOverride || {}),
         [client.id]: 0,
       },
+      clientLastPublishedMap: {
+        ...(prev.clientLastPublishedMap || {}),
+        [client.id]: nowIso,
+      },
       clientHpMap: {
         ...(prev.clientHpMap || {}),
         [client.id]: 100,
       },
       bossChestReelsCount: Math.min(12, Number(prev.bossChestReelsCount || 0) + 1),
       activityLog: [newLogEntry, ...(prev.activityLog || [])].slice(0, 15),
+      history: [newHistoryEntry, ...(prev.history || [])].slice(0, 200),
     }));
-    showFloatingXp(owner, 200, `+200 XP · Reel Publicado (${client.name})`);
+
+    showFloatingXp(chosenPlayer, 200, `+200 XP · Reel Publicado (${client.name})`);
 
     await handleUpdateClientField(
       client.id,
@@ -2068,9 +2266,137 @@ export default function AdminDashboard() {
         videosPublicadosEstaSemana: nextVidCount,
         health: 'En ritmo',
       },
-      `${client.name} restaurada al 100% HP (+200 XP para ${owner})`,
+      `${client.name} al 100% HP · +200 XP para ${chosenPlayer}`,
     );
+
+    setPublishModalClient(null);
+    setPublishForm({ player: 'Kevin', title: '', link: '' });
     setNowMs(Date.now());
+  };
+
+  /**
+   * Psicología Competitiva 1v1: Aplicar Penalización (-100 XP) por incumplimiento o quedarse dormido
+   */
+  const handleApplyPenalty = (e) => {
+    e.preventDefault();
+    const targetPlayer = normalizeAssignee(penaltyForm.player);
+    const reasonText = penaltyForm.reason.trim() || 'Incumplimiento / Quedarse dormido';
+    const xpKey = targetPlayer === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
+    const nowIso = new Date().toISOString();
+    const exactTimeStr = formatExactTime(new Date());
+
+    const penaltyLogEntry = {
+      id: `act-pen-${Date.now()}`,
+      player: targetPlayer,
+      action: `Penalización: ${reasonText}`,
+      category: 'Penalización',
+      difficulty: 'Penalización',
+      xp: -100,
+      time: exactTimeStr,
+      createdAt: nowIso,
+    };
+
+    const penaltyHistoryEntry = {
+      id: `hist-pen-${Date.now()}`,
+      type: 'quest',
+      player: targetPlayer,
+      account: 'Penalización 1v1',
+      title: `Penalización: ${reasonText}`,
+      link: '',
+      xp: -100,
+      date: todayDateStr,
+      time: exactTimeStr,
+      createdAt: nowIso,
+    };
+
+    updateRpgState((prev) => ({
+      ...prev,
+      [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0) - 100),
+      activityLog: [penaltyLogEntry, ...(prev.activityLog || [])].slice(0, 15),
+      history: [penaltyHistoryEntry, ...(prev.history || [])].slice(0, 200),
+    }));
+
+    playRpgSound('advance', rpgState.soundEnabled);
+    showToast(`Penalización aplicada a ${targetPlayer}: -100 XP (${reasonText})`);
+    setPenaltyModalOpen(false);
+  };
+
+  /**
+   * Abrir Modal de Perfil 360° & Métricas Reales de un Negocio (TikTok, IG, FB, Vistas, Engagement, WhatsApp)
+   */
+  const handleOpenMetricsModal = (client) => {
+    if (!client) return;
+    setMetricsModalClientId(client.id);
+    setMetricsDraft(getClientSocialMetrics(client));
+  };
+
+  /**
+   * Guardar Métricas Reales de Redes Sociales de un Negocio en Firestore (zenda_clients)
+   */
+  const handleSaveClientSocialMetrics = async (e, explicitClient = null) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const targetClient =
+      explicitClient ||
+      zendaClients.find((c) => c.id === metricsModalClientId) ||
+      selectedClient360;
+    if (!targetClient) return;
+
+    const prevMetrics = getClientSocialMetrics(targetClient);
+    const nextTiktok = Number(metricsDraft.tiktokFollowers) || 0;
+    const nextIg = Number(metricsDraft.instagramFollowers) || 0;
+    const nextFb = Number(metricsDraft.facebookFollowers) || 0;
+
+    // Si el usuario modificó los seguidores actuales y no cambió manualmente la variación, calcula +X automáticamente
+    const computedTiktokDelta =
+      Number(metricsDraft.tiktokWeeklyDelta) !== Number(prevMetrics.tiktokWeeklyDelta)
+        ? Number(metricsDraft.tiktokWeeklyDelta) || 0
+        : prevMetrics.tiktokFollowers > 0 && nextTiktok !== prevMetrics.tiktokFollowers
+        ? nextTiktok - prevMetrics.tiktokFollowers
+        : Number(metricsDraft.tiktokWeeklyDelta) || 0;
+
+    const computedIgDelta =
+      Number(metricsDraft.instagramWeeklyDelta) !== Number(prevMetrics.instagramWeeklyDelta)
+        ? Number(metricsDraft.instagramWeeklyDelta) || 0
+        : prevMetrics.instagramFollowers > 0 && nextIg !== prevMetrics.instagramFollowers
+        ? nextIg - prevMetrics.instagramFollowers
+        : Number(metricsDraft.instagramWeeklyDelta) || 0;
+
+    const computedFbDelta =
+      Number(metricsDraft.facebookWeeklyDelta) !== Number(prevMetrics.facebookWeeklyDelta)
+        ? Number(metricsDraft.facebookWeeklyDelta) || 0
+        : prevMetrics.facebookFollowers > 0 && nextFb !== prevMetrics.facebookFollowers
+        ? nextFb - prevMetrics.facebookFollowers
+        : Number(metricsDraft.facebookWeeklyDelta) || 0;
+
+    const updatedSocialMetrics = {
+      tiktokFollowers: nextTiktok,
+      tiktokGoal: Number(metricsDraft.tiktokGoal) || 0,
+      tiktokWeeklyDelta: computedTiktokDelta,
+      instagramFollowers: nextIg,
+      instagramGoal: Number(metricsDraft.instagramGoal) || 0,
+      instagramWeeklyDelta: computedIgDelta,
+      facebookFollowers: nextFb,
+      facebookGoal: Number(metricsDraft.facebookGoal) || 0,
+      facebookWeeklyDelta: computedFbDelta,
+      reelViews: Number(metricsDraft.reelViews) || 0,
+      avgReach: Number(metricsDraft.avgReach) || 0,
+      engagementRate: Number(metricsDraft.engagementRate) || 0,
+      whatsappClicks: Number(metricsDraft.whatsappClicks) || 0,
+      bestReelTitle: String(metricsDraft.bestReelTitle || '').trim(),
+      bestReelViews: Number(metricsDraft.bestReelViews) || 0,
+      bestReelUrl: String(metricsDraft.bestReelUrl || '').trim(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setMetricsDraft(updatedSocialMetrics);
+    await handleUpdateClientField(
+      targetClient.id,
+      { socialMetrics: updatedSocialMetrics },
+      `Métricas reales de ${targetClient.name} guardadas en Firestore`,
+    );
+    if (metricsModalClientId === targetClient.id) {
+      setMetricsModalClientId(null);
+    }
   };
 
   /**
@@ -2093,6 +2419,9 @@ export default function AdminDashboard() {
       return;
     }
 
+    const nowIso = new Date().toISOString();
+    const exactTimeStr = formatExactTime(new Date());
+
     const newLogEntry = {
       id: `act-${Date.now()}`,
       player,
@@ -2100,8 +2429,21 @@ export default function AdminDashboard() {
       category: 'Personal / Hábito',
       difficulty: 'Hábito Diario',
       xp: 50,
-      time: formatExactTime(new Date()),
-      createdAt: new Date().toISOString(),
+      time: exactTimeStr,
+      createdAt: nowIso,
+    };
+
+    const newHistoryEntry = {
+      id: `hist-chk-${Date.now()}`,
+      type: 'quest',
+      player,
+      account: 'Personal / Hábito',
+      title: 'Check-in 7:30 AM Despegue',
+      link: '',
+      xp: 50,
+      date: todayDateStr,
+      time: exactTimeStr,
+      createdAt: nowIso,
     };
 
     updateRpgState((prev) => ({
@@ -2110,6 +2452,7 @@ export default function AdminDashboard() {
       [streakKey]: Math.max(0, Number(prev[streakKey] ?? 0)) + 1,
       [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0)) + 50,
       activityLog: [newLogEntry, ...(prev.activityLog || [])].slice(0, 15),
+      history: [newHistoryEntry, ...(prev.history || [])].slice(0, 200),
     }));
 
     playRpgSound('xp', rpgState.soundEnabled);
@@ -2118,25 +2461,28 @@ export default function AdminDashboard() {
   };
 
   /**
-   * Creación rápida inline de Quest (sin abrir modales) para Kevin, Marco o Backlog
+   * Creación rápida inline de Quest (con XP libre customXp y categoría) para Kevin, Marco o Backlog
    */
   const handleQuickCreateMissionInline = async ({
     title,
     client,
     assignee,
     questDifficulty = 'Guion',
+    customXp = 100,
     priority = 'Urgente',
     deadline = todayDateStr,
     isTodayPinned = true,
   }) => {
     if (!title || !title.trim()) return;
     const nowIso = new Date().toISOString();
+    const resolvedXp = Math.max(10, Number(customXp) || 100);
 
     const record = {
       title: title.trim(),
       client: client || 'Zenda Agency',
       assignee: normalizeAssignee(assignee),
-      questDifficulty,
+      questDifficulty: questDifficulty || 'Reto',
+      customXp: resolvedXp,
       questStatus: 'Pendiente',
       stage: 'Guion',
       priority,
@@ -2162,7 +2508,7 @@ export default function AdminDashboard() {
     }
 
     playRpgSound('advance', rpgState.soundEnabled);
-    showToast(`Nueva Quest asignada a ${record.assignee} (${record.client})`);
+    showToast(`Nueva Quest (+${resolvedXp} XP) asignada a ${record.assignee} (${record.client})`);
   };
 
   /**
@@ -2221,6 +2567,7 @@ export default function AdminDashboard() {
 
     const isPub = newSprint.stage === 'Publicado';
     const nowIso = new Date().toISOString();
+    const resolvedXp = Math.max(10, Number(newSprint.customXp) || 100);
 
     const record = {
       title: newSprint.title.trim(),
@@ -2233,6 +2580,7 @@ export default function AdminDashboard() {
           : newSprint.stage === 'Grabado'
           ? 'Grabación'
           : getDefaultDifficultyForCategory(newSprint.client)),
+      customXp: resolvedXp,
       questStatus: isPub ? 'Completado' : newSprint.stage === 'Grabado' ? 'En Curso' : 'Pendiente',
       stage: newSprint.stage || 'Guion',
       priority: newSprint.priority,
@@ -2263,12 +2611,13 @@ export default function AdminDashboard() {
       client: zendaClients[0]?.name || 'Zenda Agency',
       assignee: 'Kevin',
       questDifficulty: 'Guion',
+      customXp: 100,
       stage: 'Guion',
       priority: 'Alta',
       deadline: getTodayDate(),
     });
     setSprintModalOpen(false);
-    showToast('Quest guardada en Zenda OS');
+    showToast(`Quest (+${resolvedXp} XP) guardada en Zenda OS`);
   };
 
   const handleDeleteSprint = async (id) => {
@@ -2426,7 +2775,6 @@ export default function AdminDashboard() {
       setCalendarEvents((prev) => [...prev, { id: `local-cal-${Date.now()}`, ...record }]);
     }
 
-    // Dispara POST JSON ({ title, time, assignedTo }) al Webhook opcional (n8n/WhatsApp) si está configurado
     sendCalendarWebhookPost({
       title: record.title,
       time: record.time,
@@ -2546,21 +2894,37 @@ export default function AdminDashboard() {
   // CÁLCULOS RPG: BARRA DE SALUD (HP -25%/24H), DUELO 1v1, PERFILES & QUESTS
   // ============================================================================
 
-  // Lista unificada de Categorías de Quest (4 Clientes Oficiales + 3 Categorías Personales/Hábitos)
+  // Lista unificada de Categorías de Quest (4 Clientes Oficiales + Categorías Personales + Personalizadas)
   const allQuestCategoryOptions = useMemo(() => {
     const clientNames = zendaClients.map((c) => c.name);
-    return [...clientNames, ...PERSONAL_QUEST_CATEGORIES];
-  }, [zendaClients]);
+    const customList = Array.isArray(rpgState.customCategories) ? rpgState.customCategories : [];
+    const fromSprints = sprints
+      .map((s) => String(s.client || '').trim())
+      .filter(Boolean);
+    const seen = new Set();
+    const combined = [];
+    for (const item of [...clientNames, ...PERSONAL_QUEST_CATEGORIES, ...customList, ...fromSprints]) {
+      const k = item.toLowerCase();
+      if (!seen.has(k)) {
+        seen.add(k);
+        combined.push(item);
+      }
+    }
+    return combined;
+  }, [zendaClients, rpgState.customCategories, sprints]);
 
   // 1. BARRA DE SALUD (HP) DE LOS 4 CLIENTES:
   // Empieza con 100% HP al publicar y pierde -25% HP por cada 24h sin publicación nueva.
+  // Sincronizado entre las 4 tarjetas principales, el menú lateral (CUENTAS (4)) y zenda_system/rpg_state.
   const accountHealthCards = useMemo(() => {
     return zendaClients.map((client) => {
       const accountKey = normalizeAccountKey(client.name);
       const timestamps = [];
 
-      if (client.lastPublishedAt) {
-        const t = Date.parse(client.lastPublishedAt);
+      const syncedLastPub =
+        rpgState.clientLastPublishedMap?.[client.id] || client.lastPublishedAt;
+      if (syncedLastPub) {
+        const t = Date.parse(syncedLastPub);
         if (!Number.isNaN(t)) timestamps.push(t);
       }
 
@@ -2591,6 +2955,13 @@ export default function AdminDashboard() {
         ) {
           const rawTs = sc.publishedAt || sc.updatedAt;
           const t = rawTs ? Date.parse(rawTs) : NaN;
+          if (!Number.isNaN(t)) timestamps.push(t);
+        }
+      }
+
+      for (const hItem of rpgState.history || []) {
+        if (hItem.type === 'reel' && normalizeAccountKey(hItem.account) === accountKey) {
+          const t = hItem.createdAt ? Date.parse(hItem.createdAt) : NaN;
           if (!Number.isNaN(t)) timestamps.push(t);
         }
       }
@@ -2645,8 +3016,31 @@ export default function AdminDashboard() {
     scriptsList,
     nowMs,
     rpgState.manualHoursOverride,
+    rpgState.clientLastPublishedMap,
+    rpgState.history,
     healedClientFlashId,
   ]);
+
+  // Mantiene sincronizado el mapa clientsHp en Firestore (zenda_system/rpg_state) con el HP real de las 4 tarjetas
+  useEffect(() => {
+    if (!accountHealthCards.length) return;
+    const currentMap = rpgState.clientsHp || rpgState.clientHpMap || {};
+    let hasDiff = false;
+    const nextHpMap = { ...currentMap };
+    for (const card of accountHealthCards) {
+      if (currentMap[card.client.id] !== card.hpPercent) {
+        nextHpMap[card.client.id] = card.hpPercent;
+        hasDiff = true;
+      }
+    }
+    if (hasDiff) {
+      updateRpgState({
+        clientsHp: nextHpMap,
+        clientHpMap: nextHpMap,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountHealthCards]);
 
   // 2. QUESTS DEL DÍA (Máximo 3 misiones visibles por jugador: Kevin vs Marco)
   const priorityWeight = (priority) => {
@@ -2740,7 +3134,7 @@ export default function AdminDashboard() {
   const marcoLevelPercent = Math.round((marcoLevelXP / XP_PER_LEVEL) * 100);
   const marcoCheckedInToday = rpgState.marcoLastCheckIn === todayDateStr;
 
-  // Duelo 1v1 Semanal (Kevin vs Marco)
+  // Duelo 1v1 Semanal (Kevin vs Marco) + Psicología Competitiva de Brecha
   const totalDuelXP = kevinTotalXP + marcoTotalXP;
   const kevinDuelPercent = totalDuelXP > 0 ? Math.round((kevinTotalXP / totalDuelXP) * 100) : 50;
   const marcoDuelPercent = totalDuelXP > 0 ? 100 - kevinDuelPercent : 50;
@@ -2751,10 +3145,53 @@ export default function AdminDashboard() {
       ? 'Marco'
       : null;
   const duelDiffXP = Math.abs(kevinTotalXP - marcoTotalXP);
+  const duelGapPsychologyMessage =
+    duelLeader === 'Kevin'
+      ? `Marco está a +${duelDiffXP} XP de quitarle la corona a Kevin`
+      : duelLeader === 'Marco'
+      ? `Kevin está a +${duelDiffXP} XP de quitarle la corona a Marco`
+      : 'Empate en vivo · La siguiente misión define quién toma la corona';
+
   const recentActivityLog = useMemo(
     () => (Array.isArray(rpgState.activityLog) ? rpgState.activityLog.slice(0, 5) : []),
     [rpgState.activityLog],
   );
+
+  // Bóveda / Historial Completo de Victorias & Publicaciones (zenda_system/rpg_state.history)
+  const filteredVictoryHistory = useMemo(() => {
+    const rawHistory = Array.isArray(rpgState.history) ? [...rpgState.history] : [];
+    const seenQuestIds = new Set(rawHistory.map((h) => h.questId).filter(Boolean));
+
+    // Incluir también cualquier misión ya completada en zenda_sprints que no estuviera en history
+    for (const sp of sprints) {
+      if (getQuestRpgStatus(sp) === 'Completado' && !seenQuestIds.has(sp.id)) {
+        const diff = getQuestDifficultyInfo(sp);
+        rawHistory.push({
+          id: `hist-sp-${sp.id}`,
+          questId: sp.id,
+          type: diff.id === 'Reel Publicado' ? 'reel' : 'quest',
+          player: normalizeAssignee(sp.assignee),
+          account: sp.client || 'Zenda Agency',
+          title: sp.title,
+          link: sp.link || '',
+          xp: diff.xp,
+          date: sp.completedDate || sp.deadline || todayDateStr,
+          time: sp.publishedAt ? formatExactTime(sp.publishedAt) : '',
+          createdAt: sp.publishedAt || sp.updatedAt || sp.createdAt || '',
+        });
+      }
+    }
+
+    return rawHistory.filter((item) => {
+      const matchesPlayer =
+        historyPlayerFilter === 'all' || normalizeAssignee(item.player) === historyPlayerFilter;
+      const matchesType =
+        historyTypeFilter === 'all' ||
+        (historyTypeFilter === 'reel' && item.type === 'reel') ||
+        (historyTypeFilter === 'quest' && item.type !== 'reel');
+      return matchesPlayer && matchesType;
+    });
+  }, [rpgState.history, sprints, historyPlayerFilter, historyTypeFilter, todayDateStr]);
 
   // 4. META SEMANAL (X / 12 Reels Publicados esta semana - Arranca en 0/12 real)
   const weeklyPublishedCount = useMemo(() => {
@@ -2775,12 +3212,18 @@ export default function AdminDashboard() {
   );
   const isBossChestUnlocked = weeklyPublishedCount >= WEEKLY_AGENCY_GOAL;
 
-  // 5. BACKLOG COLAPSADO POR CUENTA Y CATEGORÍAS PERSONALES
+  // 5. BACKLOG POR CUENTA Y CATEGORÍAS (Calcula dinámicamente TODAS las tareas con estado != Completado)
   const backlogByClient = useMemo(() => {
+    const customCats = Array.isArray(rpgState.customCategories) ? rpgState.customCategories : [];
     const categoryEntries = [
       ...zendaClients.map((c) => ({ id: c.id, name: c.name, leadOwner: c.leadOwner || 'Kevin' })),
       ...PERSONAL_QUEST_CATEGORIES.map((catName, idx) => ({
         id: `personal-cat-${idx}`,
+        name: catName,
+        leadOwner: 'Kevin',
+      })),
+      ...customCats.map((catName, idx) => ({
+        id: `custom-cat-${idx}`,
         name: catName,
         leadOwner: 'Kevin',
       })),
@@ -2804,8 +3247,9 @@ export default function AdminDashboard() {
         return matchesAssignee && matchesQuery;
       });
 
-      const pendingBacklogOnly = filteredTasks.filter(
-        (t) => !activeTop3IdsSet.has(t.id) && getMissionStage(t) !== 'Publicado',
+      // Cuenta dinámicamente todas las tareas cuyo estado es distinto a 'Completado'
+      const pendingTasksForAccount = filteredTasks.filter(
+        (t) => getQuestRpgStatus(t) !== 'Completado',
       );
 
       return {
@@ -2813,13 +3257,13 @@ export default function AdminDashboard() {
         accountKey,
         allClientTasks,
         filteredTasks,
-        pendingBacklogCount: pendingBacklogOnly.length,
+        pendingBacklogCount: pendingTasksForAccount.length,
       };
     });
   }, [
     zendaClients,
     sprints,
-    activeTop3IdsSet,
+    rpgState.customCategories,
     backlogAssigneeFilter,
     backlogSearchQuery,
   ]);
@@ -3115,37 +3559,43 @@ export default function AdminDashboard() {
           })}
         </nav>
 
-        {/* Acceso rápido a las 4 cuentas oficiales con indicador de HP */}
+        {/* Acceso rápido a las 4 cuentas oficiales con indicador de HP sincronizado con Firestore */}
         <div className="mb-4 border-t border-[#27272A] pt-4">
           <p className="px-2 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
             Cuentas ({accountHealthCards.length})
           </p>
           <div className="mt-2 space-y-1">
-            {accountHealthCards.map(({ client, hpPercent }) => (
-              <button
-                key={client.id}
-                type="button"
-                onClick={() => handleOpenClient360(client.id, 'finances')}
-                className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
-                  activeTab === 'clients' && selectedClient360Id === client.id
-                    ? 'bg-white/10 text-white font-semibold'
-                    : 'text-[#A1A1AA] hover:bg-white/5 hover:text-white'
-                }`}
-              >
-                <span className="truncate">{client.name}</span>
-                <span
-                  className={`font-mono text-[10px] font-semibold ${
-                    hpPercent < 30
-                      ? 'text-[#EF4444]'
-                      : hpPercent > 60
-                      ? 'text-[#10B981]'
-                      : 'text-zinc-300'
+            {accountHealthCards.map(({ client, hpPercent }) => {
+              const syncedHp =
+                typeof rpgState.clientsHp?.[client.id] === 'number'
+                  ? rpgState.clientsHp[client.id]
+                  : hpPercent;
+              return (
+                <button
+                  key={client.id}
+                  type="button"
+                  onClick={() => handleOpenClient360(client.id, 'metrics')}
+                  className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
+                    activeTab === 'clients' && selectedClient360Id === client.id
+                      ? 'bg-white/10 text-white font-semibold'
+                      : 'text-[#A1A1AA] hover:bg-white/5 hover:text-white'
                   }`}
                 >
-                  {hpPercent}%
-                </span>
-              </button>
-            ))}
+                  <span className="truncate">{client.name}</span>
+                  <span
+                    className={`font-mono text-[10px] font-semibold ${
+                      syncedHp < 30
+                        ? 'text-[#EF4444]'
+                        : syncedHp > 60
+                        ? 'text-[#10B981]'
+                        : 'text-zinc-300'
+                    }`}
+                  >
+                    {syncedHp}% HP
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -3289,7 +3739,6 @@ export default function AdminDashboard() {
                 }`}
                 title="Notificaciones Web Push 15 min antes de eventos y 7:25 AM Despegue"
               >
-                <Bell className="h-3.5 w-3.5" />
                 <span>
                   {notificationPermission === 'granted'
                     ? '🔔 Alertas Activas'
@@ -3462,7 +3911,7 @@ export default function AdminDashboard() {
               >
                 {/* ============================================================ */}
                 {/* 1. FILA SUPERIOR: 4 CUENTAS COMPACTAS                        */}
-                {/* (Nombre, barra fina de HP %, horas sin publicar y + Publicar) */}
+                {/* (Nombre, barra fina de HP %, horas sin publicar, Métricas y + Publicar Anti-Trampa) */}
                 {/* ============================================================ */}
                 <section aria-label="Estado de Cuentas">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -3477,6 +3926,11 @@ export default function AdminDashboard() {
 
                       const isOptimal = statusKey === 'green';
                       const isCritical = statusKey === 'red';
+                      const socialMetrics = getClientSocialMetrics(client);
+                      const totalFollowers =
+                        socialMetrics.tiktokFollowers +
+                        socialMetrics.instagramFollowers +
+                        socialMetrics.facebookFollowers;
 
                       const barColor = isOptimal
                         ? 'bg-[#10B981]'
@@ -3497,7 +3951,7 @@ export default function AdminDashboard() {
                           <div className="flex items-center justify-between gap-2">
                             <button
                               type="button"
-                              onClick={() => handleOpenClient360(client.id, 'scripts')}
+                              onClick={() => handleOpenClient360(client.id, 'metrics')}
                               className="truncate text-left text-sm font-bold text-[#0F172A] hover:text-[#0066C5]"
                             >
                               {client.name}
@@ -3533,16 +3987,26 @@ export default function AdminDashboard() {
                             />
                           </div>
 
-                          {/* Fila 3: Horas sin publicar + Botón limpio + Publicar */}
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono text-[11px] text-slate-500">
-                              {hoursSincePublish}h sin publicar
-                            </span>
+                          {/* Fila 3: Horas sin publicar + Ver Perfil/Métricas + Botón + Publicar Anti-Trampa */}
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex flex-col">
+                              <span className="font-mono text-[11px] text-slate-500">
+                                {hoursSincePublish}h sin publicar
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenMetricsModal(client)}
+                                className="text-left font-mono text-[10px] font-semibold text-[#0066C5] hover:underline"
+                              >
+                                Ver Perfil / Métricas
+                                {totalFollowers > 0 ? ` (${totalFollowers.toLocaleString()} seg)` : ''}
+                              </button>
+                            </div>
 
                             <button
                               type="button"
-                              onClick={() => handleQuickMarkAccountPublishedNow(client)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-xs font-semibold text-[#0F172A] transition-colors hover:border-[#0066C5] hover:bg-[#0066C5] hover:text-white"
+                              onClick={() => handleOpenPublishModal(client)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1.5 text-xs font-semibold text-[#0F172A] transition-colors hover:border-[#0066C5] hover:bg-[#0066C5] hover:text-white"
                             >
                               <Plus className="h-3 w-3" />
                               <span>Publicar</span>
@@ -3556,23 +4020,22 @@ export default function AdminDashboard() {
 
                 {/* ============================================================ */}
                 {/* 2. MOTOR COMPETITIVO 1v1 (DUELO SEMANAL KEVIN VS MARCO)      */}
-                {/* Barra comparativa de XP, 👑 Líder Actual y Log en Vivo (Top 5) */}
+                {/* Barra comparativa de XP, 👑 Líder Actual, Psicología y Log   */}
                 {/* ============================================================ */}
                 <section
                   aria-label="Duelo Semanal 1v1 Kevin vs Marco y Log de Actividad"
                   className="rounded-2xl border border-[#E2E8F0] bg-[#FFFFFF] p-4 shadow-sm"
                 >
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-center">
-                    {/* Izquierda: Marcador 1v1 + Barra Comparativa de XP */}
+                    {/* Izquierda: Marcador 1v1 + Barra Comparativa de XP + Psicología */}
                     <div className="space-y-2.5 lg:col-span-7 lg:border-r lg:border-[#E2E8F0] lg:pr-5">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-bold uppercase tracking-wider text-[#0F172A]">
                             Duelo Semanal 1v1
                           </span>
                           {duelLeader ? (
                             <span className="inline-flex items-center gap-1 rounded-full border border-[#10B981]/30 bg-[#10B981]/10 px-2.5 py-0.5 font-mono text-[11px] font-bold text-[#10B981]">
-                              <Crown className="h-3 w-3" />
                               <span>👑 Líder Actual: {duelLeader} (+{duelDiffXP} XP)</span>
                             </span>
                           ) : (
@@ -3582,16 +4045,27 @@ export default function AdminDashboard() {
                           )}
                         </div>
 
-                        <button
-                          type="button"
-                          disabled={isResettingSeason}
-                          onClick={handleResetSeasonToZero}
-                          className="inline-flex items-center gap-1 rounded-md border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-500 transition-colors hover:border-[#0066C5] hover:text-[#0066C5]"
-                          title="Reiniciar temporada competitiva a 0 XP"
-                        >
-                          <RotateCcw className="h-2.5 w-2.5" />
-                          <span>Reiniciar Temporada a 0</span>
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setPenaltyModalOpen(true)}
+                            className="inline-flex items-center gap-1 rounded-md border border-[#EF4444]/30 bg-[#EF4444]/5 px-2 py-0.5 font-mono text-[10px] font-semibold text-[#EF4444] transition-colors hover:bg-[#EF4444] hover:text-white"
+                            title="Registrar penalización de -100 XP por incumplimiento o quedarse dormido"
+                          >
+                            <span>⚠️ Penalización (-100 XP)</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isResettingSeason}
+                            onClick={handleResetSeasonToZero}
+                            className="inline-flex items-center gap-1 rounded-md border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-500 transition-colors hover:border-[#0066C5] hover:text-[#0066C5]"
+                            title="Reiniciar temporada competitiva a 0 XP"
+                          >
+                            <RotateCcw className="h-2.5 w-2.5" />
+                            <span>Reiniciar a 0</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* Marcadores Jugadores */}
@@ -3636,6 +4110,20 @@ export default function AdminDashboard() {
                           title={`Marco: ${marcoTotalXP} XP (${marcoDuelPercent}%)`}
                         />
                       </div>
+
+                      {/* Mensaje Psicológico de Brecha en Tiempo Real */}
+                      <div className="flex items-center justify-between rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5">
+                        <span className="font-mono text-[11px] font-semibold text-[#0F172A]">
+                          ⚡ {duelGapPsychologyMessage}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setBottomSectionTab('history')}
+                          className="shrink-0 font-mono text-[10px] font-bold text-[#0066C5] hover:underline"
+                        >
+                          Ver Historial ({filteredVictoryHistory.length}) →
+                        </button>
+                      </div>
                     </div>
 
                     {/* Derecha: Log de Actividad en Vivo (Últimas 5 acciones completadas con hora exacta) */}
@@ -3655,38 +4143,56 @@ export default function AdminDashboard() {
                         </p>
                       ) : (
                         <div className="mt-1.5 space-y-1">
-                          {recentActivityLog.map((entry) => (
-                            <div
-                              key={entry.id}
-                              className="flex items-center justify-between gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-[11px]"
-                            >
-                              <div className="flex items-center gap-1.5 truncate">
-                                <span className="shrink-0 font-mono text-[10px] text-slate-400">
-                                  {entry.time}
-                                </span>
+                          {recentActivityLog.map((entry) => {
+                            const isPenalty = Number(entry.xp) < 0;
+                            return (
+                              <div
+                                key={entry.id}
+                                className="flex items-center justify-between gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-[11px]"
+                              >
+                                <div className="flex items-center gap-1.5 truncate">
+                                  <span className="shrink-0 font-mono text-[10px] text-slate-400">
+                                    {entry.time}
+                                  </span>
+                                  <span
+                                    className={`shrink-0 font-mono font-bold ${
+                                      entry.player === 'Kevin'
+                                        ? 'text-[#0066C5]'
+                                        : 'text-[#0F172A]'
+                                    }`}
+                                  >
+                                    {entry.player}
+                                  </span>
+                                  <span className="truncate font-medium text-[#0F172A]">
+                                    {entry.action}
+                                  </span>
+                                  {entry.category && (
+                                    <span className="hidden shrink-0 rounded bg-white px-1.5 py-0.5 font-mono text-[9px] text-slate-500 ring-1 ring-[#E2E8F0] sm:inline">
+                                      {entry.category}
+                                    </span>
+                                  )}
+                                  {entry.link && (
+                                    <a
+                                      href={entry.link}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="shrink-0 text-[#0066C5] hover:underline"
+                                      title="Abrir Reel publicado"
+                                    >
+                                      <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                  )}
+                                </div>
                                 <span
-                                  className={`shrink-0 font-mono font-bold ${
-                                    entry.player === 'Kevin'
-                                      ? 'text-[#0066C5]'
-                                      : 'text-[#0F172A]'
+                                  className={`shrink-0 font-mono text-[10px] font-bold ${
+                                    isPenalty ? 'text-[#EF4444]' : 'text-[#10B981]'
                                   }`}
                                 >
-                                  {entry.player}
+                                  {isPenalty ? `${entry.xp} XP` : `+${entry.xp} XP`}
                                 </span>
-                                <span className="truncate font-medium text-[#0F172A]">
-                                  {entry.action}
-                                </span>
-                                {entry.category && (
-                                  <span className="hidden shrink-0 rounded bg-white px-1.5 py-0.5 font-mono text-[9px] text-slate-500 ring-1 ring-[#E2E8F0] sm:inline">
-                                    {entry.category}
-                                  </span>
-                                )}
                               </div>
-                              <span className="shrink-0 font-mono text-[10px] font-bold text-[#10B981]">
-                                +{entry.xp} XP
-                              </span>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -3694,7 +4200,7 @@ export default function AdminDashboard() {
                 </section>
 
                 {/* ============================================================ */}
-                {/* 2. PERFILES (KEVIN VS MARCO) & QUESTS DEL DÍA (MÁX 3)        */}
+                {/* 3. PERFILES (KEVIN VS MARCO) & CREADOR DE MISIONES XP LIBRE  */}
                 {/* ============================================================ */}
                 <section aria-label="Jugadores y Quests del Día">
                   <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -3816,7 +4322,7 @@ export default function AdminDashboard() {
                               </span>
                             </div>
 
-                            {/* Formulario rápido para añadir Quest */}
+                            {/* Creador de Misiones Personalizadas con XP Libre (50, 100, 150, 250, 500 + input numérico) y Categorías */}
                             <form
                               onSubmit={(e) => {
                                 e.preventDefault();
@@ -3826,6 +4332,7 @@ export default function AdminDashboard() {
                                   client: hunter.quickForm.client,
                                   assignee: hunter.player,
                                   questDifficulty: hunter.quickForm.questDifficulty,
+                                  customXp: hunter.quickForm.customXp,
                                   priority: 'Urgente',
                                   deadline: todayDateStr,
                                   isTodayPinned: true,
@@ -3834,19 +4341,23 @@ export default function AdminDashboard() {
                               }}
                               className="mt-2.5 flex flex-col gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-2.5"
                             >
-                              <div className="grid grid-cols-2 gap-2">
+                              {/* Fila 1: Selector de Categoría + Botón Crear Categoría */}
+                              <div className="flex items-center gap-1.5">
                                 <select
                                   value={hunter.quickForm.client}
                                   onChange={(e) => {
-                                    const nextCategory = e.target.value;
+                                    const val = e.target.value;
+                                    if (val === '__create_new__') {
+                                      setAddingCustomCategoryFor(hunter.player);
+                                      return;
+                                    }
                                     hunter.setQuickForm({
                                       ...hunter.quickForm,
-                                      client: nextCategory,
-                                      questDifficulty:
-                                        getDefaultDifficultyForCategory(nextCategory),
+                                      client: val,
+                                      questDifficulty: getDefaultDifficultyForCategory(val),
                                     });
                                   }}
-                                  className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5]"
+                                  className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5]"
                                 >
                                   <optgroup label="Clientes Oficiales">
                                     {zendaClients.map((c) => (
@@ -3862,39 +4373,115 @@ export default function AdminDashboard() {
                                       </option>
                                     ))}
                                   </optgroup>
+                                  {(rpgState.customCategories || []).length > 0 && (
+                                    <optgroup label="Categorías Personalizadas">
+                                      {(rpgState.customCategories || []).map((cat) => (
+                                        <option key={cat} value={cat}>
+                                          {cat}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                  <option value="__create_new__">+ Crear nueva categoría...</option>
                                 </select>
 
-                                <select
-                                  value={hunter.quickForm.questDifficulty}
-                                  onChange={(e) =>
-                                    hunter.setQuickForm({
-                                      ...hunter.quickForm,
-                                      questDifficulty: e.target.value,
-                                    })
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setAddingCustomCategoryFor(
+                                      addingCustomCategoryFor === hunter.player
+                                        ? null
+                                        : hunter.player,
+                                    )
                                   }
-                                  className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 font-mono text-xs font-semibold text-[#0066C5] outline-none focus:border-[#0066C5]"
+                                  className="shrink-0 rounded-lg border border-[#E2E8F0] bg-white px-2 py-1.5 font-mono text-[10px] font-semibold text-slate-600 hover:border-[#0066C5] hover:text-[#0066C5]"
+                                  title="Crear nueva categoría"
                                 >
-                                  <optgroup label="Clientes & Contenido">
-                                    {QUEST_DIFFICULTIES.filter((d) => d.group === 'client').map(
-                                      (d) => (
-                                        <option key={d.id} value={d.id}>
-                                          {d.badgeLabel}
-                                        </option>
-                                      ),
-                                    )}
-                                  </optgroup>
-                                  <optgroup label="Personal & Hábitos">
-                                    {QUEST_DIFFICULTIES.filter((d) => d.group === 'personal').map(
-                                      (d) => (
-                                        <option key={d.id} value={d.id}>
-                                          {d.badgeLabel}
-                                        </option>
-                                      ),
-                                    )}
-                                  </optgroup>
-                                </select>
+                                  + Categoría
+                                </button>
                               </div>
 
+                              {/* Input inline si está creando una categoría nueva */}
+                              {addingCustomCategoryFor === hunter.player && (
+                                <div className="flex items-center gap-1.5 rounded-lg border border-[#0066C5]/40 bg-white p-1.5">
+                                  <input
+                                    type="text"
+                                    value={customCategoryDraft}
+                                    onChange={(e) => setCustomCategoryDraft(e.target.value)}
+                                    placeholder="Nombre de categoría (ej. Prospección B2B)..."
+                                    className="flex-1 px-2 py-1 text-xs text-[#0F172A] outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCreateCustomCategory(hunter.player)}
+                                    className="rounded-md bg-[#0066C5] px-2.5 py-1 font-mono text-[10px] font-bold text-white"
+                                  >
+                                    Guardar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setAddingCustomCategoryFor(null)}
+                                    className="rounded-md px-1.5 py-1 text-xs text-slate-400 hover:text-slate-700"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Fila 2: Botones rápidos de XP Libre (50, 100, 150, 250, 500 XP) + Input Numérico Editable */}
+                              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <span className="font-mono text-[10px] font-semibold text-slate-500">
+                                    XP:
+                                  </span>
+                                  {QUICK_XP_PRESETS.map((xpPreset) => {
+                                    const isSelectedXp =
+                                      Number(hunter.quickForm.customXp) === xpPreset;
+                                    return (
+                                      <button
+                                        key={xpPreset}
+                                        type="button"
+                                        onClick={() =>
+                                          hunter.setQuickForm({
+                                            ...hunter.quickForm,
+                                            customXp: xpPreset,
+                                          })
+                                        }
+                                        className={`rounded-md px-2 py-0.5 font-mono text-[10px] font-bold transition-colors ${
+                                          isSelectedXp
+                                            ? 'bg-[#0066C5] text-white'
+                                            : 'border border-[#E2E8F0] bg-white text-slate-600 hover:border-[#0066C5] hover:text-[#0066C5]'
+                                        }`}
+                                      >
+                                        +{xpPreset}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min="10"
+                                    max="5000"
+                                    step="10"
+                                    value={hunter.quickForm.customXp}
+                                    onChange={(e) =>
+                                      hunter.setQuickForm({
+                                        ...hunter.quickForm,
+                                        customXp: e.target.value,
+                                      })
+                                    }
+                                    aria-label="XP Libre"
+                                    className="w-16 rounded-md border border-[#E2E8F0] bg-white px-2 py-0.5 text-right font-mono text-xs font-bold text-[#0066C5] outline-none focus:border-[#0066C5]"
+                                  />
+                                  <span className="font-mono text-[10px] font-bold text-[#0066C5]">
+                                    XP
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Fila 3: Título de la misión + Botón Crear */}
                               <div className="flex gap-2">
                                 <input
                                   type="text"
@@ -3905,7 +4492,7 @@ export default function AdminDashboard() {
                                       title: e.target.value,
                                     })
                                   }
-                                  placeholder={`Nueva quest para ${hunter.player}...`}
+                                  placeholder={`Título de la misión para ${hunter.player}...`}
                                   className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5]"
                                 />
                                 <button
@@ -3949,19 +4536,31 @@ export default function AdminDashboard() {
                                             {quest.client || 'Zenda Agency'}
                                           </span>
 
-                                          <select
-                                            value={diffInfo.id}
-                                            onChange={(e) =>
-                                              handleChangeQuestDifficulty(quest, e.target.value)
-                                            }
-                                            className={`cursor-pointer rounded-md border px-2 py-0.5 font-mono text-[10px] font-bold outline-none ${diffInfo.colorClass}`}
-                                          >
-                                            {QUEST_DIFFICULTIES.map((d) => (
-                                              <option key={d.id} value={d.id}>
-                                                {d.badgeLabel}
-                                              </option>
-                                            ))}
-                                          </select>
+                                          {/* Selector rápido de XP libre en la tarjeta */}
+                                          <div className="inline-flex items-center gap-1 rounded-md border border-[#0066C5]/30 bg-[#0066C5]/5 px-1.5 py-0.5">
+                                            <span className="font-mono text-[10px] font-bold text-[#0066C5]">
+                                              +
+                                            </span>
+                                            <input
+                                              type="number"
+                                              min="10"
+                                              max="5000"
+                                              step="10"
+                                              defaultValue={diffInfo.xp}
+                                              key={`${quest.id}-${diffInfo.xp}`}
+                                              onBlur={(e) => {
+                                                const nextVal = Number(e.target.value);
+                                                if (nextVal > 0 && nextVal !== diffInfo.xp) {
+                                                  handleChangeQuestCustomXp(quest, nextVal);
+                                                }
+                                              }}
+                                              className="w-11 bg-transparent font-mono text-[10px] font-bold text-[#0066C5] outline-none"
+                                              title="Editar XP libre de esta misión"
+                                            />
+                                            <span className="font-mono text-[10px] font-bold text-[#0066C5]">
+                                              XP
+                                            </span>
+                                          </div>
                                         </div>
 
                                         <div className="flex items-center gap-1">
@@ -4050,224 +4649,415 @@ export default function AdminDashboard() {
                 </section>
 
                 {/* ============================================================ */}
-                {/* 3. BACKLOG COLAPSADO POR CLIENTE                             */}
+                {/* 4. SECCIÓN INFERIOR CON PESTAÑAS CLARAS:                     */}
+                {/*    Misiones Activas | Historial de Victorias & Publicaciones */}
                 {/* ============================================================ */}
                 <section
-                  aria-label="Reserva de Quests por Cliente"
+                  aria-label="Misiones Activas e Historial de Victorias"
                   className="rounded-2xl border border-[#E2E8F0] bg-[#FFFFFF] p-4 sm:p-5 shadow-sm"
                 >
                   <div className="flex flex-col gap-3 border-b border-[#E2E8F0] pb-3.5 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-2">
-                      <Filter className="h-4 w-4 text-[#0066C5]" />
-                      <h2 className="text-sm font-bold text-[#0F172A]">
-                        Backlog por Cuenta
-                      </h2>
-                    </div>
-
+                    {/* Pestañas: Misiones Activas | Historial de Victorias & Publicaciones */}
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="relative">
-                        <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
-                        <input
-                          type="text"
-                          value={backlogSearchQuery}
-                          onChange={(e) => setBacklogSearchQuery(e.target.value)}
-                          placeholder="Buscar..."
-                          className="w-36 sm:w-44 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] py-1 pl-8 pr-2.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5] focus:bg-white"
-                        />
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setBottomSectionTab('active')}
+                        className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors ${
+                          bottomSectionTab === 'active'
+                            ? 'bg-[#0066C5] text-white shadow-sm'
+                            : 'border border-[#E2E8F0] bg-[#F8FAFC] text-slate-600 hover:text-[#0F172A]'
+                        }`}
+                      >
+                        <Filter className="h-3.5 w-3.5" />
+                        <span>Misiones Activas (Backlog por Cuenta)</span>
+                      </button>
 
-                      <div className="flex rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-0.5 text-xs">
-                        {['all', 'Kevin', 'Marco'].map((who) => (
-                          <button
-                            key={who}
-                            type="button"
-                            onClick={() => setBacklogAssigneeFilter(who)}
-                            className={`rounded-md px-2.5 py-0.5 font-medium transition-colors ${
-                              backlogAssigneeFilter === who
-                                ? 'bg-[#0066C5] text-white'
-                                : 'text-slate-600 hover:text-[#0F172A]'
-                            }`}
-                          >
-                            {who === 'all' ? 'Todos' : who}
-                          </button>
-                        ))}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setBottomSectionTab('history')}
+                        className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors ${
+                          bottomSectionTab === 'history'
+                            ? 'bg-[#0066C5] text-white shadow-sm'
+                            : 'border border-[#E2E8F0] bg-[#F8FAFC] text-slate-600 hover:text-[#0F172A]'
+                        }`}
+                      >
+                        <Trophy className="h-3.5 w-3.5" />
+                        <span>Historial de Victorias &amp; Publicaciones</span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 font-mono text-[10px] ${
+                            bottomSectionTab === 'history'
+                              ? 'bg-white/20 text-white'
+                              : 'bg-white text-slate-600 ring-1 ring-[#E2E8F0]'
+                          }`}
+                        >
+                          {filteredVictoryHistory.length}
+                        </span>
+                      </button>
                     </div>
+
+                    {/* Filtros contextuales según la pestaña activa */}
+                    {bottomSectionTab === 'active' ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
+                          <input
+                            type="text"
+                            value={backlogSearchQuery}
+                            onChange={(e) => setBacklogSearchQuery(e.target.value)}
+                            placeholder="Buscar tarea..."
+                            className="w-36 sm:w-44 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] py-1 pl-8 pr-2.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5] focus:bg-white"
+                          />
+                        </div>
+
+                        <div className="flex rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-0.5 text-xs">
+                          {['all', 'Kevin', 'Marco'].map((who) => (
+                            <button
+                              key={who}
+                              type="button"
+                              onClick={() => setBacklogAssigneeFilter(who)}
+                              className={`rounded-md px-2.5 py-0.5 font-medium transition-colors ${
+                                backlogAssigneeFilter === who
+                                  ? 'bg-[#0066C5] text-white'
+                                  : 'text-slate-600 hover:text-[#0F172A]'
+                              }`}
+                            >
+                              {who === 'all' ? 'Todos' : who}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Filtro Jugador */}
+                        <div className="flex rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-0.5 text-xs">
+                          {[
+                            { id: 'all', label: 'Todos' },
+                            { id: 'Kevin', label: 'Kevin' },
+                            { id: 'Marco', label: 'Marco' },
+                          ].map((who) => (
+                            <button
+                              key={who.id}
+                              type="button"
+                              onClick={() => setHistoryPlayerFilter(who.id)}
+                              className={`rounded-md px-2.5 py-0.5 font-medium transition-colors ${
+                                historyPlayerFilter === who.id
+                                  ? 'bg-[#0066C5] text-white'
+                                  : 'text-slate-600 hover:text-[#0F172A]'
+                              }`}
+                            >
+                              {who.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Filtro Tipo: Reels Publicados vs Misiones Completadas */}
+                        <div className="flex rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-0.5 text-xs">
+                          {[
+                            { id: 'all', label: 'Todo' },
+                            { id: 'reel', label: '🎬 Reels Publicados' },
+                            { id: 'quest', label: '✓ Misiones Completadas' },
+                          ].map((tp) => (
+                            <button
+                              key={tp.id}
+                              type="button"
+                              onClick={() => setHistoryTypeFilter(tp.id)}
+                              className={`rounded-md px-2.5 py-0.5 font-medium transition-colors ${
+                                historyTypeFilter === tp.id
+                                  ? 'bg-[#0F172A] text-white'
+                                  : 'text-slate-600 hover:text-[#0F172A]'
+                              }`}
+                            >
+                              {tp.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="mt-3 space-y-2">
-                    {backlogByClient.map((group) => {
-                      const { client, filteredTasks, pendingBacklogCount } = group;
-                      const isExpanded = !!expandedBacklogClients[client.id];
-                      const quickVal = backlogQuickInputs[client.id] || '';
+                  {/* CONTENIDO PESTAÑA 1: MISIONES ACTIVAS (BACKLOG POR CUENTA CON PENDIENTES DINÁMICOS) */}
+                  {bottomSectionTab === 'active' ? (
+                    <div className="mt-3 space-y-2">
+                      {backlogByClient.map((group) => {
+                        const { client, filteredTasks, pendingBacklogCount } = group;
+                        const isExpanded = !!expandedBacklogClients[client.id];
+                        const quickVal = backlogQuickInputs[client.id] || '';
 
-                      return (
-                        <div
-                          key={`backlog-acc-${client.id}`}
-                          className="overflow-hidden rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]"
-                        >
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExpandedBacklogClients((prev) => ({
-                                ...prev,
-                                [client.id]: !prev[client.id],
-                              }))
-                            }
-                            className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-slate-100/70"
+                        return (
+                          <div
+                            key={`backlog-acc-${client.id}`}
+                            className="overflow-hidden rounded-xl border border-[#E2E8F0] bg-[#F8FAFC]"
                           >
-                            <div className="flex items-center gap-2.5">
-                              <span className="text-xs font-bold text-[#0F172A]">
-                                {client.name}
-                              </span>
-                              <span className="rounded-full bg-white px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-600 ring-1 ring-[#E2E8F0]">
-                                {pendingBacklogCount} pendientes
-                              </span>
-                            </div>
-
-                            <ChevronDown
-                              className={`h-4 w-4 text-slate-400 transition-transform ${
-                                isExpanded ? 'rotate-180' : ''
-                              }`}
-                            />
-                          </button>
-
-                          <AnimatePresence initial={false}>
-                            {isExpanded && (
-                              <motion.div
-                                key={`content-${client.id}`}
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: 'auto', opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.2 }}
-                                className="border-t border-[#E2E8F0] bg-white p-3.5"
-                              >
-                                <form
-                                  onSubmit={(e) => {
-                                    e.preventDefault();
-                                    if (!quickVal.trim()) return;
-                                    handleQuickCreateMissionInline({
-                                      title: quickVal,
-                                      client: client.name,
-                                      assignee: client.leadOwner || 'Kevin',
-                                      questDifficulty: 'Guion',
-                                      priority: 'Media',
-                                      deadline: todayDateStr,
-                                      isTodayPinned: false,
-                                    });
-                                    setBacklogQuickInputs((prev) => ({
-                                      ...prev,
-                                      [client.id]: '',
-                                    }));
-                                  }}
-                                  className="mb-3 flex gap-2"
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedBacklogClients((prev) => ({
+                                  ...prev,
+                                  [client.id]: !prev[client.id],
+                                }))
+                              }
+                              className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-slate-100/70"
+                            >
+                              <div className="flex items-center gap-2.5">
+                                <span className="text-xs font-bold text-[#0F172A]">
+                                  {client.name}
+                                </span>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold ring-1 ${
+                                    pendingBacklogCount > 0
+                                      ? 'bg-[#0066C5]/10 text-[#0066C5] ring-[#0066C5]/30'
+                                      : 'bg-white text-slate-500 ring-[#E2E8F0]'
+                                  }`}
                                 >
-                                  <input
-                                    type="text"
-                                    value={quickVal}
-                                    onChange={(e) =>
+                                  {pendingBacklogCount} pendientes
+                                </span>
+                              </div>
+
+                              <ChevronDown
+                                className={`h-4 w-4 text-slate-400 transition-transform ${
+                                  isExpanded ? 'rotate-180' : ''
+                                }`}
+                              />
+                            </button>
+
+                            <AnimatePresence initial={false}>
+                              {isExpanded && (
+                                <motion.div
+                                  key={`content-${client.id}`}
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: 'auto', opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="border-t border-[#E2E8F0] bg-white p-3.5"
+                                >
+                                  <form
+                                    onSubmit={(e) => {
+                                      e.preventDefault();
+                                      if (!quickVal.trim()) return;
+                                      handleQuickCreateMissionInline({
+                                        title: quickVal,
+                                        client: client.name,
+                                        assignee: client.leadOwner || 'Kevin',
+                                        questDifficulty: 'Guion',
+                                        customXp: 100,
+                                        priority: 'Media',
+                                        deadline: todayDateStr,
+                                        isTodayPinned: false,
+                                      });
                                       setBacklogQuickInputs((prev) => ({
                                         ...prev,
-                                        [client.id]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder={`Añadir tarea a ${client.name}...`}
-                                    className="flex-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5] focus:bg-white"
-                                  />
-                                  <button
-                                    type="submit"
-                                    className="inline-flex items-center gap-1 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0052A3]"
+                                        [client.id]: '',
+                                      }));
+                                    }}
+                                    className="mb-3 flex gap-2"
                                   >
-                                    <Plus className="h-3.5 w-3.5" />
-                                    Guardar
-                                  </button>
-                                </form>
+                                    <input
+                                      type="text"
+                                      value={quickVal}
+                                      onChange={(e) =>
+                                        setBacklogQuickInputs((prev) => ({
+                                          ...prev,
+                                          [client.id]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder={`Añadir tarea a ${client.name} (+100 XP)...`}
+                                      className="flex-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5] focus:bg-white"
+                                    />
+                                    <button
+                                      type="submit"
+                                      className="inline-flex items-center gap-1 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0052A3]"
+                                    >
+                                      <Plus className="h-3.5 w-3.5" />
+                                      Guardar
+                                    </button>
+                                  </form>
 
-                                {filteredTasks.length === 0 ? (
-                                  <p className="py-2 text-center text-xs text-slate-400">
-                                    Sin tareas en reserva.
-                                  </p>
-                                ) : (
-                                  <div className="space-y-1.5">
-                                    {filteredTasks.map((task) => {
-                                      const rpgSt = getQuestRpgStatus(task);
-                                      const diffInfo = getQuestDifficultyInfo(task);
-                                      const inTop3 = activeTop3IdsSet.has(task.id);
-                                      const assignee = normalizeAssignee(task.assignee);
+                                  {filteredTasks.length === 0 ? (
+                                    <p className="py-2 text-center text-xs text-slate-400">
+                                      Sin tareas en reserva.
+                                    </p>
+                                  ) : (
+                                    <div className="space-y-1.5">
+                                      {filteredTasks.map((task) => {
+                                        const rpgSt = getQuestRpgStatus(task);
+                                        const diffInfo = getQuestDifficultyInfo(task);
+                                        const inTop3 = activeTop3IdsSet.has(task.id);
+                                        const assignee = normalizeAssignee(task.assignee);
 
-                                      return (
-                                        <div
-                                          key={task.id}
-                                          className="flex flex-col gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2.5 sm:flex-row sm:items-center sm:justify-between"
-                                        >
-                                          <div className="flex flex-wrap items-center gap-2">
-                                            {inTop3 && (
-                                              <span className="rounded bg-[#0066C5]/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#0066C5]">
-                                                Hoy
+                                        return (
+                                          <div
+                                            key={task.id}
+                                            className="flex flex-col gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2.5 sm:flex-row sm:items-center sm:justify-between"
+                                          >
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              {inTop3 && (
+                                                <span className="rounded bg-[#0066C5]/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#0066C5]">
+                                                  Hoy
+                                                </span>
+                                              )}
+                                              <span className="font-mono text-[11px] font-semibold text-slate-500">
+                                                @{assignee}
                                               </span>
-                                            )}
-                                            <span className="font-mono text-[11px] font-semibold text-slate-500">
-                                              @{assignee}
-                                            </span>
-                                            <span
-                                              className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-bold ${diffInfo.colorClass}`}
-                                            >
-                                              {diffInfo.badgeLabel}
-                                            </span>
-                                            <span
-                                              className={`text-xs font-semibold ${
-                                                rpgSt === 'Completado'
-                                                  ? 'line-through text-slate-400'
-                                                  : 'text-[#0F172A]'
-                                              }`}
-                                            >
-                                              {task.title}
-                                            </span>
-                                          </div>
+                                              <span
+                                                className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-bold ${diffInfo.colorClass}`}
+                                              >
+                                                {diffInfo.badgeLabel}
+                                              </span>
+                                              <span
+                                                className={`text-xs font-semibold ${
+                                                  rpgSt === 'Completado'
+                                                    ? 'line-through text-slate-400'
+                                                    : 'text-[#0F172A]'
+                                                }`}
+                                              >
+                                                {task.title}
+                                              </span>
+                                            </div>
 
-                                          <div className="flex items-center gap-1.5">
-                                            <button
-                                              type="button"
-                                              onClick={() => handleAdvanceQuestRpgState(task)}
-                                              className={`rounded-md border px-2 py-1 font-mono text-[10px] font-bold ${
-                                                rpgSt === 'Completado'
-                                                  ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
-                                                  : 'border-[#E2E8F0] bg-white text-[#0F172A] hover:border-[#0066C5] hover:text-[#0066C5]'
-                                              }`}
-                                            >
-                                              {rpgSt} →
-                                            </button>
-
-                                            {!inTop3 && rpgSt !== 'Completado' && (
+                                            <div className="flex items-center gap-1.5">
                                               <button
                                                 type="button"
-                                                onClick={() => handlePromoteBacklogToToday(task)}
-                                                className="rounded-md bg-[#0066C5]/10 px-2 py-1 font-mono text-[10px] font-bold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
+                                                onClick={() => handleAdvanceQuestRpgState(task)}
+                                                className={`rounded-md border px-2 py-1 font-mono text-[10px] font-bold ${
+                                                  rpgSt === 'Completado'
+                                                    ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
+                                                    : 'border-[#E2E8F0] bg-white text-[#0F172A] hover:border-[#0066C5] hover:text-[#0066C5]'
+                                                }`}
                                               >
-                                                Subir a Hoy
+                                                {rpgSt} →
                                               </button>
-                                            )}
 
-                                            <button
-                                              type="button"
-                                              onClick={() => handleDeleteSprint(task.id)}
-                                              className="rounded p-1 text-slate-400 hover:text-[#EF4444]"
-                                            >
-                                              <Trash2 className="h-3.5 w-3.5" />
-                                            </button>
+                                              {!inTop3 && rpgSt !== 'Completado' && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handlePromoteBacklogToToday(task)}
+                                                  className="rounded-md bg-[#0066C5]/10 px-2 py-1 font-mono text-[10px] font-bold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
+                                                >
+                                                  Subir a Hoy
+                                                </button>
+                                              )}
+
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDeleteSprint(task.id)}
+                                                className="rounded p-1 text-slate-400 hover:text-[#EF4444]"
+                                              >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                              </button>
+                                            </div>
                                           </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    /* CONTENIDO PESTAÑA 2: BÓVEDA / HISTORIAL DE VICTORIAS & PUBLICACIONES */
+                    <div className="mt-3">
+                      {filteredVictoryHistory.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] p-8 text-center">
+                          <p className="font-mono text-xs font-semibold text-slate-500">
+                            Aún no hay victorias o publicaciones registradas con este filtro.
+                          </p>
+                          <p className="mt-1 text-xs text-slate-400">
+                            Cada Quest completada o Reel publicado con el botón + Publicar quedará guardado permanentemente aquí.
+                          </p>
                         </div>
-                      );
-                    })}
-                  </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="border-b border-[#E2E8F0] bg-[#F8FAFC] font-mono text-[10px] uppercase tracking-wider text-slate-500">
+                              <tr>
+                                <th className="px-3.5 py-2.5">Fecha &amp; Hora</th>
+                                <th className="px-3.5 py-2.5">Jugador</th>
+                                <th className="px-3.5 py-2.5">Tipo</th>
+                                <th className="px-3.5 py-2.5">Cuenta / Categoría</th>
+                                <th className="px-3.5 py-2.5">Título / Victoria</th>
+                                <th className="px-3.5 py-2.5 text-right">XP</th>
+                                <th className="px-3.5 py-2.5 text-right">Enlace</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#E2E8F0]">
+                              {filteredVictoryHistory.map((item) => {
+                                const isReel = item.type === 'reel';
+                                const isNegative = Number(item.xp) < 0;
+                                return (
+                                  <tr
+                                    key={item.id}
+                                    className="transition-colors hover:bg-[#F8FAFC]"
+                                  >
+                                    <td className="whitespace-nowrap px-3.5 py-2.5 font-mono text-[11px] text-slate-500">
+                                      {item.date || todayDateStr} · {item.time || '--:--'}
+                                    </td>
+                                    <td className="whitespace-nowrap px-3.5 py-2.5">
+                                      <span
+                                        className={`inline-flex items-center rounded-md px-2 py-0.5 font-mono text-[11px] font-bold ${
+                                          item.player === 'Kevin'
+                                            ? 'bg-[#0066C5]/10 text-[#0066C5]'
+                                            : 'bg-slate-900 text-white'
+                                        }`}
+                                      >
+                                        {item.player}
+                                      </span>
+                                    </td>
+                                    <td className="whitespace-nowrap px-3.5 py-2.5">
+                                      <span
+                                        className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold ${
+                                          isReel
+                                            ? 'bg-[#10B981]/10 text-[#10B981]'
+                                            : isNegative
+                                            ? 'bg-[#EF4444]/10 text-[#EF4444]'
+                                            : 'bg-[#F8FAFC] text-slate-600 ring-1 ring-[#E2E8F0]'
+                                        }`}
+                                      >
+                                        {isReel ? '🎬 Reel Publicado' : isNegative ? '⚠️ Penalización' : '✓ Quest'}
+                                      </span>
+                                    </td>
+                                    <td className="whitespace-nowrap px-3.5 py-2.5 font-semibold text-[#0F172A]">
+                                      {item.account}
+                                    </td>
+                                    <td className="px-3.5 py-2.5 font-medium text-[#0F172A]">
+                                      {item.title}
+                                    </td>
+                                    <td
+                                      className={`whitespace-nowrap px-3.5 py-2.5 text-right font-mono text-xs font-bold ${
+                                        isNegative ? 'text-[#EF4444]' : 'text-[#10B981]'
+                                      }`}
+                                    >
+                                      {isNegative ? `${item.xp} XP` : `+${item.xp} XP`}
+                                    </td>
+                                    <td className="whitespace-nowrap px-3.5 py-2.5 text-right">
+                                      {item.link ? (
+                                        <a
+                                          href={item.link}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 rounded-md border border-[#0066C5]/30 bg-[#0066C5]/5 px-2 py-0.5 font-mono text-[10px] font-semibold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
+                                        >
+                                          <span>Ver Reel</span>
+                                          <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                      ) : (
+                                        <span className="font-mono text-[10px] text-slate-400">
+                                          —
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </section>
               </motion.div>
             )}
@@ -4316,6 +5106,7 @@ export default function AdminDashboard() {
                         const retainer = Number(client.monthlyRetainer || 0);
                         const paid = Number(client.currentMonthPaid || 0);
                         const remaining = Math.max(0, retainer - paid);
+                        const sm = getClientSocialMetrics(client);
 
                         return (
                           <motion.div
@@ -4323,7 +5114,7 @@ export default function AdminDashboard() {
                             whileHover={{ y: -3 }}
                             whileTap={{ scale: 0.99 }}
                             transition={SPRING_TRANSITION}
-                            onClick={() => handleOpenClient360(client.id, 'finances')}
+                            onClick={() => handleOpenClient360(client.id, 'metrics')}
                             className="group flex cursor-pointer flex-col justify-between rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm transition-shadow hover:border-slate-400 hover:shadow-md"
                           >
                             <div>
@@ -4344,18 +5135,111 @@ export default function AdminDashboard() {
                                 </span>
                               </div>
 
-                              <h3 className="mt-4 text-xl font-bold text-[#0F172A] transition-colors group-hover:text-cyan-700">
+                              <h3 className="mt-4 text-xl font-bold text-[#0F172A] transition-colors group-hover:text-[#0066C5]">
                                 {client.name}
                               </h3>
                               <p className="font-mono text-xs font-medium text-slate-500">
                                 {client.category}
                               </p>
 
-                              <p className="mt-3 text-xs leading-relaxed text-slate-600 line-clamp-2">
+                              <p className="mt-2.5 text-xs leading-relaxed text-slate-600 line-clamp-2">
                                 {client.story}
                               </p>
 
-                              <div className="mt-5 rounded-xl border border-slate-100 bg-[#F8FAFC] p-3.5">
+                              {/* Resumen de Seguidores y Métricas Reales */}
+                              <div className="mt-4 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                    Redes &amp; Métricas Reales
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenMetricsModal(client);
+                                    }}
+                                    className="rounded-md bg-[#0066C5]/10 px-2 py-0.5 font-mono text-[10px] font-bold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
+                                  >
+                                    Actualizar Métricas
+                                  </button>
+                                </div>
+
+                                <div className="mt-2 grid grid-cols-3 gap-1.5 text-center font-mono text-[11px]">
+                                  <div className="rounded-lg border border-[#E2E8F0] bg-white px-2 py-1.5">
+                                    <div className="text-[9px] text-slate-400">TikTok</div>
+                                    <div className="font-bold text-[#0F172A]">
+                                      {sm.tiktokFollowers.toLocaleString()}
+                                    </div>
+                                    {sm.tiktokWeeklyDelta !== 0 && (
+                                      <div
+                                        className={`text-[9px] font-semibold ${
+                                          sm.tiktokWeeklyDelta > 0
+                                            ? 'text-[#10B981]'
+                                            : 'text-[#EF4444]'
+                                        }`}
+                                      >
+                                        {sm.tiktokWeeklyDelta > 0
+                                          ? `+${sm.tiktokWeeklyDelta}`
+                                          : sm.tiktokWeeklyDelta}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="rounded-lg border border-[#E2E8F0] bg-white px-2 py-1.5">
+                                    <div className="text-[9px] text-slate-400">Instagram</div>
+                                    <div className="font-bold text-[#0F172A]">
+                                      {sm.instagramFollowers.toLocaleString()}
+                                    </div>
+                                    {sm.instagramWeeklyDelta !== 0 && (
+                                      <div
+                                        className={`text-[9px] font-semibold ${
+                                          sm.instagramWeeklyDelta > 0
+                                            ? 'text-[#10B981]'
+                                            : 'text-[#EF4444]'
+                                        }`}
+                                      >
+                                        {sm.instagramWeeklyDelta > 0
+                                          ? `+${sm.instagramWeeklyDelta}`
+                                          : sm.instagramWeeklyDelta}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="rounded-lg border border-[#E2E8F0] bg-white px-2 py-1.5">
+                                    <div className="text-[9px] text-slate-400">Facebook</div>
+                                    <div className="font-bold text-[#0F172A]">
+                                      {sm.facebookFollowers.toLocaleString()}
+                                    </div>
+                                    {sm.facebookWeeklyDelta !== 0 && (
+                                      <div
+                                        className={`text-[9px] font-semibold ${
+                                          sm.facebookWeeklyDelta > 0
+                                            ? 'text-[#10B981]'
+                                            : 'text-[#EF4444]'
+                                        }`}
+                                      >
+                                        {sm.facebookWeeklyDelta > 0
+                                          ? `+${sm.facebookWeeklyDelta}`
+                                          : sm.facebookWeeklyDelta}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="mt-2 flex items-center justify-between font-mono text-[10px] text-slate-500">
+                                  <span>
+                                    Vistas Reels: <strong className="text-[#0F172A]">{sm.reelViews.toLocaleString()}</strong>
+                                  </span>
+                                  <span>
+                                    Eng: <strong className="text-[#0F172A]">{sm.engagementRate}%</strong>
+                                  </span>
+                                  <span>
+                                    Clics WA: <strong className="text-[#0F172A]">{sm.whatsappClicks}</strong>
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 rounded-xl border border-slate-100 bg-[#F8FAFC] p-3.5">
                                 <div className="flex items-center justify-between text-xs">
                                   <span className="font-mono text-[11px] text-slate-500">Retainer Mensual:</span>
                                   <span className="font-mono font-bold text-slate-900">
@@ -4417,8 +5301,8 @@ export default function AdminDashboard() {
                                 🎬 Videos sem: {client.videosPublicadosEstaSemana ?? 0} / {client.weeklyVideoGoal ?? 3}
                               </span>
 
-                              <span className="inline-flex items-center gap-1 font-mono text-xs font-bold text-slate-900 transition-transform group-hover:translate-x-0.5">
-                                Abrir Vista 360° →
+                              <span className="inline-flex items-center gap-1 font-mono text-xs font-bold text-[#0066C5] transition-transform group-hover:translate-x-0.5">
+                                Ver Perfil / Métricas →
                               </span>
                             </div>
                           </motion.div>
@@ -4468,7 +5352,16 @@ export default function AdminDashboard() {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2.5">
-                          {/* Selector dinámico para cambiar entre Dolciangel, Lalanchita y King´s barber shop */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenMetricsModal(selectedClient360)}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-[#0066C5] px-3.5 py-2 font-mono text-xs font-bold text-white shadow-sm hover:bg-[#0052A3]"
+                          >
+                            <Zap className="h-3.5 w-3.5" />
+                            Actualizar Métricas
+                          </button>
+
+                          {/* Selector dinámico para cambiar entre Zenda Agency, Dolciangel, La Lanchita y King's Barber Shop */}
                           <select
                             value={selectedClient360.id}
                             onChange={(e) => handleOpenClient360(e.target.value, client360Tab)}
@@ -4495,9 +5388,10 @@ export default function AdminDashboard() {
                         </div>
                       </div>
 
-                      {/* Navegación Interna de las 4 Pestañas 360° con layoutId */}
+                      {/* Navegación Interna de las 5 Pestañas 360° con layoutId */}
                       <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
                         {[
+                          { id: 'metrics', label: 'Métricas & Redes Sociales', icon: Globe },
                           { id: 'finances', label: 'A. Finanzas & Estado de Pago', icon: CreditCard },
                           { id: 'scripts', label: `B. Taller de Guiones (${clientScripts.length})`, icon: FileText },
                           { id: 'infra', label: 'C. Infraestructura & Avance Técnico', icon: Code2 },
@@ -4535,6 +5429,313 @@ export default function AdminDashboard() {
                     </div>
 
                     <AnimatePresence mode="wait">
+                      {/* ======================================================== */}
+                      {/* PESTAÑA 0: PERFIL 360° DE REDES Y MÉTRICAS REALES        */}
+                      {/* ======================================================== */}
+                      {client360Tab === 'metrics' && (
+                        <motion.div
+                          key="360-metrics"
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -6 }}
+                          transition={{ duration: 0.18 }}
+                          className="space-y-6"
+                        >
+                          {(() => {
+                            const sm = getClientSocialMetrics(selectedClient360);
+                            const updateInlineMetric = (partial) => {
+                              const nextMetrics = {
+                                ...sm,
+                                ...partial,
+                                updatedAt: new Date().toISOString(),
+                              };
+                              handleUpdateClientField(
+                                selectedClient360.id,
+                                { socialMetrics: nextMetrics },
+                                '',
+                              );
+                            };
+
+                            return (
+                              <>
+                                <div className="flex flex-col gap-3 rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                                  <div>
+                                    <h3 className="text-base font-bold text-[#0F172A]">
+                                      Perfil 360° de Redes Sociales &amp; Indicadores Reales · {selectedClient360.name}
+                                    </h3>
+                                    <p className="text-xs text-slate-500">
+                                      Edita directamente cualquier indicador o usa el botón &ldquo;Actualizar Métricas&rdquo; cada domingo. Guardado en tiempo real en Firestore (<code>zenda_clients</code>).
+                                    </p>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenMetricsModal(selectedClient360)}
+                                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-[#0066C5] px-4 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-[#0052A3]"
+                                  >
+                                    <Zap className="h-3.5 w-3.5" />
+                                    Actualizar Métricas (Modal Rápido)
+                                  </button>
+                                </div>
+
+                                {/* Seguidores Actuales, Meta y Variación Semanal (+X seguidores) en TikTok, Instagram y Facebook */}
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                                  {[
+                                    {
+                                      network: 'TikTok',
+                                      followersKey: 'tiktokFollowers',
+                                      goalKey: 'tiktokGoal',
+                                      deltaKey: 'tiktokWeeklyDelta',
+                                    },
+                                    {
+                                      network: 'Instagram',
+                                      followersKey: 'instagramFollowers',
+                                      goalKey: 'instagramGoal',
+                                      deltaKey: 'instagramWeeklyDelta',
+                                    },
+                                    {
+                                      network: 'Facebook',
+                                      followersKey: 'facebookFollowers',
+                                      goalKey: 'facebookGoal',
+                                      deltaKey: 'facebookWeeklyDelta',
+                                    },
+                                  ].map((net) => {
+                                    const currentVal = Number(sm[net.followersKey] || 0);
+                                    const goalVal = Number(sm[net.goalKey] || 0);
+                                    const deltaVal = Number(sm[net.deltaKey] || 0);
+                                    const progressPct =
+                                      goalVal > 0
+                                        ? Math.min(100, Math.round((currentVal / goalVal) * 100))
+                                        : 0;
+
+                                    return (
+                                      <div
+                                        key={net.network}
+                                        className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm"
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <span className="font-mono text-xs font-bold uppercase tracking-wider text-[#0F172A]">
+                                            {net.network}
+                                          </span>
+                                          <span
+                                            className={`rounded-full px-2.5 py-0.5 font-mono text-[11px] font-bold ${
+                                              deltaVal > 0
+                                                ? 'bg-[#10B981]/10 text-[#10B981]'
+                                                : deltaVal < 0
+                                                ? 'bg-[#EF4444]/10 text-[#EF4444]'
+                                                : 'bg-[#F8FAFC] text-slate-500 ring-1 ring-[#E2E8F0]'
+                                            }`}
+                                          >
+                                            {deltaVal > 0
+                                              ? `+${deltaVal} esta sem`
+                                              : deltaVal < 0
+                                              ? `${deltaVal} esta sem`
+                                              : '0 var. sem'}
+                                          </span>
+                                        </div>
+
+                                        <div className="mt-4 grid grid-cols-3 gap-2">
+                                          <div>
+                                            <label className="block font-mono text-[10px] text-slate-500">
+                                              Seguidores
+                                            </label>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              value={currentVal}
+                                              onChange={(e) =>
+                                                updateInlineMetric({
+                                                  [net.followersKey]: Number(e.target.value) || 0,
+                                                })
+                                              }
+                                              onBlur={() => showToast('Seguidores actualizados en Zenda OS')}
+                                              className="mt-1 w-full rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1.5 font-mono text-sm font-bold text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
+                                            />
+                                          </div>
+
+                                          <div>
+                                            <label className="block font-mono text-[10px] text-slate-500">
+                                              Meta
+                                            </label>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              value={goalVal}
+                                              onChange={(e) =>
+                                                updateInlineMetric({
+                                                  [net.goalKey]: Number(e.target.value) || 0,
+                                                })
+                                              }
+                                              onBlur={() => showToast('Meta actualizada en Zenda OS')}
+                                              className="mt-1 w-full rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1.5 font-mono text-sm font-semibold text-slate-700 outline-none focus:border-[#0066C5] focus:bg-white"
+                                            />
+                                          </div>
+
+                                          <div>
+                                            <label className="block font-mono text-[10px] text-slate-500">
+                                              Var. (+X)
+                                            </label>
+                                            <input
+                                              type="number"
+                                              value={deltaVal}
+                                              onChange={(e) =>
+                                                updateInlineMetric({
+                                                  [net.deltaKey]: Number(e.target.value) || 0,
+                                                })
+                                              }
+                                              onBlur={() => showToast('Variación semanal guardada')}
+                                              className="mt-1 w-full rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1.5 font-mono text-sm font-semibold text-[#10B981] outline-none focus:border-[#0066C5] focus:bg-white"
+                                            />
+                                          </div>
+                                        </div>
+
+                                        <div className="mt-3">
+                                          <div className="flex justify-between font-mono text-[10px] text-slate-500">
+                                            <span>Progreso hacia la meta</span>
+                                            <span className="font-bold text-[#0F172A]">{progressPct}%</span>
+                                          </div>
+                                          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[#F8FAFC] ring-1 ring-[#E2E8F0]">
+                                            <motion.div
+                                              initial={{ width: 0 }}
+                                              animate={{ width: `${progressPct}%` }}
+                                              transition={{ duration: 0.45 }}
+                                              className="h-full rounded-full bg-[#0066C5]"
+                                            />
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Métricas Clave del Mes / Semana */}
+                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                  <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
+                                    <label className="block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                      Vistas Totales de Reels
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={sm.reelViews}
+                                      onChange={(e) =>
+                                        updateInlineMetric({
+                                          reelViews: Number(e.target.value) || 0,
+                                        })
+                                      }
+                                      onBlur={() => showToast('Vistas totales actualizadas')}
+                                      className="mt-2 w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 font-mono text-lg font-bold text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
+                                    />
+                                  </div>
+
+                                  <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
+                                    <label className="block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                      Alcance Promedio
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={sm.avgReach}
+                                      onChange={(e) =>
+                                        updateInlineMetric({
+                                          avgReach: Number(e.target.value) || 0,
+                                        })
+                                      }
+                                      onBlur={() => showToast('Alcance promedio actualizado')}
+                                      className="mt-2 w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 font-mono text-lg font-bold text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
+                                    />
+                                  </div>
+
+                                  <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
+                                    <label className="block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                      Tasa de Interacción (Engagement %)
+                                    </label>
+                                    <div className="mt-2 flex items-center gap-1.5">
+                                      <input
+                                        type="number"
+                                        step="0.1"
+                                        min="0"
+                                        value={sm.engagementRate}
+                                        onChange={(e) =>
+                                          updateInlineMetric({
+                                            engagementRate: Number(e.target.value) || 0,
+                                          })
+                                        }
+                                        onBlur={() => showToast('Engagement % actualizado')}
+                                        className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 font-mono text-lg font-bold text-[#0066C5] outline-none focus:border-[#0066C5] focus:bg-white"
+                                      />
+                                      <span className="font-mono text-sm font-bold text-slate-500">%</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
+                                    <label className="block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                      Clics a WhatsApp / Reservas
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={sm.whatsappClicks}
+                                      onChange={(e) =>
+                                        updateInlineMetric({
+                                          whatsappClicks: Number(e.target.value) || 0,
+                                        })
+                                      }
+                                      onBlur={() => showToast('Clics a WhatsApp actualizados')}
+                                      className="mt-2 w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 font-mono text-lg font-bold text-[#10B981] outline-none focus:border-[#0066C5] focus:bg-white"
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* Mejor Reel de la Semana (Título + Vistas + Link) */}
+                                <div className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm">
+                                  <span className="font-mono text-xs font-bold uppercase tracking-wider text-[#0F172A]">
+                                    🏆 Mejor Reel de la Semana (Título + Vistas)
+                                  </span>
+                                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                    <div className="sm:col-span-2">
+                                      <label className="mb-1 block font-mono text-[10px] text-slate-500">
+                                        Título / Hook del Mejor Reel
+                                      </label>
+                                      <input
+                                        type="text"
+                                        placeholder="Ej. Cómo preparamos el tiramisú artesanal en Dolciangel..."
+                                        value={sm.bestReelTitle}
+                                        onChange={(e) =>
+                                          updateInlineMetric({
+                                            bestReelTitle: e.target.value,
+                                          })
+                                        }
+                                        onBlur={() => showToast('Mejor Reel actualizado')}
+                                        className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="mb-1 block font-mono text-[10px] text-slate-500">
+                                        Vistas del Mejor Reel
+                                      </label>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={sm.bestReelViews}
+                                        onChange={(e) =>
+                                          updateInlineMetric({
+                                            bestReelViews: Number(e.target.value) || 0,
+                                          })
+                                        }
+                                        onBlur={() => showToast('Vistas del Mejor Reel actualizadas')}
+                                        className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 font-mono text-xs font-bold text-[#0066C5] outline-none focus:border-[#0066C5] focus:bg-white"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </motion.div>
+                      )}
+
                       {/* ======================================================== */}
                       {/* PESTAÑA A: FINANZAS & ESTADO DE PAGO (EDICIÓN EN VIVO)    */}
                       {/* ======================================================== */}
@@ -5643,7 +6844,6 @@ export default function AdminDashboard() {
                           : 'border-[#E2E8F0] bg-white text-[#0F172A] hover:border-[#0066C5] hover:text-[#0066C5]'
                       }`}
                     >
-                      <Bell className="h-3.5 w-3.5" />
                       <span>
                         {notificationPermission === 'granted'
                           ? '🔔 Alertas Activas (15m / 7:25 AM)'
@@ -6598,7 +7798,7 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Modal 1: Nueva Misión Operativa */}
+      {/* Modal 1: + Nueva Quest Personalizada con XP Libre y Categorías */}
       <AnimatePresence>
         {sprintModalOpen && (
           <motion.div
@@ -6619,7 +7819,7 @@ export default function AdminDashboard() {
             >
               <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                 <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-900">
-                  Nueva Misión Operativa
+                  + Nueva Quest Personalizada (XP Libre)
                 </h3>
                 <button
                   type="button"
@@ -6633,60 +7833,125 @@ export default function AdminDashboard() {
               <form onSubmit={handleAddSprint} className="mt-5 space-y-4 text-xs">
                 <div>
                   <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                    Título de la Misión / Pieza
+                    Título de la Misión / Reto
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="Ej. Reel autoridad IA para negocios"
+                    placeholder="Ej. Reel autoridad IA para negocios o Bloque profundo de programación"
                     value={newSprint.title}
                     onChange={(e) => setNewSprint({ ...newSprint, title: e.target.value })}
-                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
+                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:border-[#0066C5] focus:bg-white"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
+                {/* Categoría (4 Clientes, Personal/Hábito, Estudio/Entreno, o Crear Nueva) */}
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <label className="block font-mono text-[10px] uppercase tracking-wider text-slate-600">
                       Categoría / Cuenta
                     </label>
-                    <select
-                      value={newSprint.client}
-                      onChange={(e) => {
-                        const nextCat = e.target.value;
-                        setNewSprint({
-                          ...newSprint,
-                          client: nextCat,
-                          questDifficulty: getDefaultDifficultyForCategory(nextCat),
-                        });
-                      }}
-                      className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
-                    >
-                      {allQuestCategoryOptions.map((catName) => (
-                        <option key={catName} value={catName}>
-                          {catName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                      Dificultad / Tipo XP
-                    </label>
-                    <select
-                      value={newSprint.questDifficulty || 'Guion'}
-                      onChange={(e) =>
-                        setNewSprint({ ...newSprint, questDifficulty: e.target.value })
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAddingCustomCategoryFor(
+                          addingCustomCategoryFor === 'modal' ? null : 'modal',
+                        )
                       }
-                      className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
+                      className="font-mono text-[10px] font-bold text-[#0066C5] hover:underline"
                     >
-                      {QUEST_DIFFICULTIES.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.badgeLabel}
-                        </option>
-                      ))}
-                    </select>
+                      + Crear nueva categoría
+                    </button>
+                  </div>
+                  <select
+                    value={newSprint.client}
+                    onChange={(e) => {
+                      const nextCat = e.target.value;
+                      if (nextCat === '__create_new__') {
+                        setAddingCustomCategoryFor('modal');
+                        return;
+                      }
+                      setNewSprint({
+                        ...newSprint,
+                        client: nextCat,
+                        questDifficulty: getDefaultDifficultyForCategory(nextCat),
+                      });
+                    }}
+                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-[#0066C5] focus:bg-white"
+                  >
+                    {allQuestCategoryOptions.map((catName) => (
+                      <option key={catName} value={catName}>
+                        {catName}
+                      </option>
+                    ))}
+                    <option value="__create_new__">+ Crear nueva categoría...</option>
+                  </select>
+
+                  {addingCustomCategoryFor === 'modal' && (
+                    <div className="mt-2 flex items-center gap-2 rounded-xl border border-[#0066C5]/40 bg-[#F8FAFC] p-2">
+                      <input
+                        type="text"
+                        value={customCategoryDraft}
+                        onChange={(e) => setCustomCategoryDraft(e.target.value)}
+                        placeholder="Escribe el nombre de la nueva categoría..."
+                        className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-xs text-slate-900 outline-none focus:border-[#0066C5]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleCreateCustomCategory('modal')}
+                        className="rounded-lg bg-[#0066C5] px-3 py-1.5 font-mono text-xs font-bold text-white"
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Asignador de XP Libre (50, 100, 150, 250, 500 XP + Input Numérico Editable) */}
+                <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3.5">
+                  <label className="mb-2 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    Recompensa de XP Libre (Elige un botón rápido o escribe el valor según dificultad)
+                  </label>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {QUICK_XP_PRESETS.map((xpVal) => {
+                        const isSelected = Number(newSprint.customXp) === xpVal;
+                        return (
+                          <button
+                            key={xpVal}
+                            type="button"
+                            onClick={() =>
+                              setNewSprint({ ...newSprint, customXp: xpVal })
+                            }
+                            className={`rounded-lg px-2.5 py-1.5 font-mono text-xs font-bold transition-colors ${
+                              isSelected
+                                ? 'bg-[#0066C5] text-white shadow-sm'
+                                : 'border border-[#E2E8F0] bg-white text-slate-700 hover:border-[#0066C5] hover:text-[#0066C5]'
+                            }`}
+                          >
+                            +{xpVal} XP
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min="10"
+                        max="5000"
+                        step="10"
+                        required
+                        value={newSprint.customXp}
+                        onChange={(e) =>
+                          setNewSprint({ ...newSprint, customXp: e.target.value })
+                        }
+                        className="w-24 rounded-lg border border-[#CBD5E1] bg-white px-3 py-1.5 text-right font-mono text-sm font-bold text-[#0066C5] outline-none focus:border-[#0066C5]"
+                      />
+                      <span className="font-mono text-xs font-bold text-[#0066C5]">
+                        XP
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -6698,7 +7963,7 @@ export default function AdminDashboard() {
                     <select
                       value={newSprint.assignee}
                       onChange={(e) => setNewSprint({ ...newSprint, assignee: e.target.value })}
-                      className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
+                      className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-[#0066C5] focus:bg-white"
                     >
                       <option value="Kevin">Kevin</option>
                       <option value="Marco">Marco</option>
@@ -6712,7 +7977,7 @@ export default function AdminDashboard() {
                     <select
                       value={newSprint.priority}
                       onChange={(e) => setNewSprint({ ...newSprint, priority: e.target.value })}
-                      className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
+                      className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-[#0066C5] focus:bg-white"
                     >
                       <option value="Urgente">Urgente</option>
                       <option value="Alta">Alta</option>
@@ -6731,7 +7996,7 @@ export default function AdminDashboard() {
                     required
                     value={newSprint.deadline}
                     onChange={(e) => setNewSprint({ ...newSprint, deadline: e.target.value })}
-                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
+                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-[#0066C5] focus:bg-white"
                   />
                 </div>
 
@@ -6748,9 +8013,9 @@ export default function AdminDashboard() {
                     whileHover={{ y: -1 }}
                     whileTap={{ scale: 0.96 }}
                     transition={SPRING_TRANSITION}
-                    className="rounded-xl bg-[#0F172A] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-slate-800"
+                    className="rounded-xl bg-[#0066C5] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-[#0052A3]"
                   >
-                    Guardar Misión
+                    Guardar Quest (+{newSprint.customXp || 100} XP)
                   </motion.button>
                 </div>
               </form>
@@ -7285,6 +8550,566 @@ export default function AdminDashboard() {
                   </a>
                 </div>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal 6: Mini-Modal Anti-Trampa '+ Publicar' (Restaura 100% HP, +200 XP, +1 Meta Semanal y Guarda en Historial) */}
+      <AnimatePresence>
+        {publishModalClient && (
+          <motion.div
+            key="modal-anti-cheat-publish"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+            onClick={() => setPublishModalClient(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              transition={SPRING_TRANSITION}
+              className="w-full max-w-md rounded-2xl border border-[#E2E8F0] bg-white p-6 text-[#0F172A] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between border-b border-[#E2E8F0] pb-4">
+                <div>
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#10B981]">
+                    Registro Oficial Anti-Trampa · +200 XP · 100% HP
+                  </span>
+                  <h3 className="mt-0.5 text-base font-bold text-[#0F172A]">
+                    Publicar Reel en {publishModalClient.name}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPublishModalClient(null)}
+                  className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0F172A]"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleConfirmAntiCheatPublish} className="mt-4 space-y-4 text-xs">
+                <div>
+                  <label className="mb-1.5 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    1. ¿Quién lo publicó? (+200 XP)
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['Kevin', 'Marco'].map((who) => {
+                      const isSelected = publishForm.player === who;
+                      return (
+                        <button
+                          key={who}
+                          type="button"
+                          onClick={() => setPublishForm({ ...publishForm, player: who })}
+                          className={`rounded-xl border px-3 py-2.5 font-mono text-xs font-bold transition-colors ${
+                            isSelected
+                              ? 'border-[#0066C5] bg-[#0066C5] text-white shadow-sm'
+                              : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#0F172A] hover:border-[#0066C5]'
+                          }`}
+                        >
+                          {who} (+200 XP)
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    2. Título / Tema del Reel Publicado *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder={`Ej. Nuevo Reel para ${publishModalClient.name}...`}
+                    value={publishForm.title}
+                    onChange={(e) =>
+                      setPublishForm({ ...publishForm, title: e.target.value })
+                    }
+                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    3. Link Opcional (TikTok / Instagram / Facebook)
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://www.instagram.com/reel/... o https://www.tiktok.com/..."
+                    value={publishForm.link}
+                    onChange={(e) =>
+                      setPublishForm({ ...publishForm, link: e.target.value })
+                    }
+                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-xs text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
+                  />
+                </div>
+
+                <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3 font-mono text-[11px] text-slate-600">
+                  Al confirmar: Restaura el HP de <strong>{publishModalClient.name}</strong> al 100%, suma{' '}
+                  <strong className="text-[#10B981]">+200 XP</strong> a{' '}
+                  <strong>{publishForm.player}</strong>, sube +1 a la Meta Semanal (12/12) y archiva el registro en la Bóveda.
+                </div>
+
+                <div className="flex justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setPublishModalClient(null)}
+                    className="rounded-xl px-4 py-2 font-mono text-xs text-slate-500 hover:text-[#0F172A]"
+                  >
+                    Cancelar
+                  </button>
+                  <motion.button
+                    type="submit"
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.96 }}
+                    transition={SPRING_TRANSITION}
+                    className="rounded-xl bg-[#0066C5] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-[#0052A3]"
+                  >
+                    Confirmar Publicación (+200 XP)
+                  </motion.button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal 7: Mini-Modal de Penalización Competitiva 1v1 (-100 XP) */}
+      <AnimatePresence>
+        {penaltyModalOpen && (
+          <motion.div
+            key="modal-penalty-1v1"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+            onClick={() => setPenaltyModalOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              transition={SPRING_TRANSITION}
+              className="w-full max-w-md rounded-2xl border border-[#E2E8F0] bg-white p-6 text-[#0F172A] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between border-b border-[#E2E8F0] pb-4">
+                <div>
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#EF4444]">
+                    Psicología Competitiva 1v1
+                  </span>
+                  <h3 className="mt-0.5 text-base font-bold text-[#0F172A]">
+                    ⚠️ Aplicar Penalización (-100 XP)
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPenaltyModalOpen(false)}
+                  className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0F172A]"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleApplyPenalty} className="mt-4 space-y-4 text-xs">
+                <div>
+                  <label className="mb-1.5 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    Jugador Penalizado (-100 XP)
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['Kevin', 'Marco'].map((who) => {
+                      const isSelected = penaltyForm.player === who;
+                      return (
+                        <button
+                          key={who}
+                          type="button"
+                          onClick={() => setPenaltyForm({ ...penaltyForm, player: who })}
+                          className={`rounded-xl border px-3 py-2.5 font-mono text-xs font-bold transition-colors ${
+                            isSelected
+                              ? 'border-[#EF4444] bg-[#EF4444] text-white shadow-sm'
+                              : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#0F172A] hover:border-[#EF4444]'
+                          }`}
+                        >
+                          {who} (-100 XP)
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    Motivo de la Penalización
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. Quedarse dormido (no check-in 7:30 AM) / Incumplimiento de entrega"
+                    value={penaltyForm.reason}
+                    onChange={(e) =>
+                      setPenaltyForm({ ...penaltyForm, reason: e.target.value })
+                    }
+                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setPenaltyModalOpen(false)}
+                    className="rounded-xl px-4 py-2 font-mono text-xs text-slate-500 hover:text-[#0F172A]"
+                  >
+                    Cancelar
+                  </button>
+                  <motion.button
+                    type="submit"
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.96 }}
+                    transition={SPRING_TRANSITION}
+                    className="rounded-xl bg-[#EF4444] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-red-600"
+                  >
+                    Confirmar Penalización (-100 XP)
+                  </motion.button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal 8: Perfil 360° de Cada Negocio (Actualizar Seguidores y Métricas Reales en Firestore) */}
+      <AnimatePresence>
+        {metricsModalClientId && (
+          <motion.div
+            key="modal-client-social-metrics"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+            onClick={() => setMetricsModalClientId(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              transition={SPRING_TRANSITION}
+              className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[#E2E8F0] bg-white p-6 text-[#0F172A] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {(() => {
+                const modalClient = zendaClients.find((c) => c.id === metricsModalClientId);
+                if (!modalClient) return null;
+
+                return (
+                  <>
+                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#E2E8F0] pb-4">
+                      <div>
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#0066C5]">
+                          Perfil 360° · Indicadores Reales de Redes Sociales
+                        </span>
+                        <h3 className="mt-0.5 text-lg font-bold text-[#0F172A]">
+                          {modalClient.name} · Seguidores &amp; Métricas
+                        </h3>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={modalClient.id}
+                          onChange={(e) => {
+                            const nextClient = zendaClients.find((c) => c.id === e.target.value);
+                            if (nextClient) handleOpenMetricsModal(nextClient);
+                          }}
+                          className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1.5 font-mono text-xs font-bold text-[#0F172A] outline-none focus:border-[#0066C5]"
+                        >
+                          {zendaClients.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+
+                        <button
+                          type="button"
+                          onClick={() => setMetricsModalClientId(null)}
+                          className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0F172A]"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <form
+                      onSubmit={(e) => handleSaveClientSocialMetrics(e, modalClient)}
+                      className="mt-5 space-y-5 text-xs"
+                    >
+                      {/* 1. Seguidores actuales, meta y variación semanal (+X) en TikTok, Instagram y Facebook */}
+                      <div>
+                        <p className="mb-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          1. Seguidores Actuales, Meta &amp; Variación Semanal (+X seguidores)
+                        </p>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          {[
+                            {
+                              label: 'TikTok',
+                              fKey: 'tiktokFollowers',
+                              gKey: 'tiktokGoal',
+                              dKey: 'tiktokWeeklyDelta',
+                            },
+                            {
+                              label: 'Instagram',
+                              fKey: 'instagramFollowers',
+                              gKey: 'instagramGoal',
+                              dKey: 'instagramWeeklyDelta',
+                            },
+                            {
+                              label: 'Facebook',
+                              fKey: 'facebookFollowers',
+                              gKey: 'facebookGoal',
+                              dKey: 'facebookWeeklyDelta',
+                            },
+                          ].map((net) => (
+                            <div
+                              key={net.label}
+                              className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3"
+                            >
+                              <div className="mb-2 flex items-center justify-between">
+                                <span className="font-mono text-xs font-bold text-[#0F172A]">
+                                  {net.label}
+                                </span>
+                                <span className="font-mono text-[10px] font-semibold text-[#10B981]">
+                                  {Number(metricsDraft[net.dKey] || 0) >= 0
+                                    ? `+${Number(metricsDraft[net.dKey] || 0)}`
+                                    : Number(metricsDraft[net.dKey] || 0)}{' '}
+                                  sem
+                                </span>
+                              </div>
+
+                              <div className="space-y-2">
+                                <div>
+                                  <label className="block font-mono text-[10px] text-slate-500">
+                                    Seguidores actuales
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={metricsDraft[net.fKey]}
+                                    onChange={(e) =>
+                                      setMetricsDraft({
+                                        ...metricsDraft,
+                                        [net.fKey]: e.target.value,
+                                      })
+                                    }
+                                    className="mt-0.5 w-full rounded-lg border border-[#CBD5E1] bg-white px-2.5 py-1.5 font-mono text-xs font-bold text-[#0F172A] outline-none focus:border-[#0066C5]"
+                                  />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <div>
+                                    <label className="block font-mono text-[9px] text-slate-500">
+                                      Meta
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={metricsDraft[net.gKey]}
+                                      onChange={(e) =>
+                                        setMetricsDraft({
+                                          ...metricsDraft,
+                                          [net.gKey]: e.target.value,
+                                        })
+                                      }
+                                      className="mt-0.5 w-full rounded-lg border border-[#CBD5E1] bg-white px-2 py-1 font-mono text-[11px] text-slate-700 outline-none focus:border-[#0066C5]"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block font-mono text-[9px] text-slate-500">
+                                      Var. (+X sem)
+                                    </label>
+                                    <input
+                                      type="number"
+                                      value={metricsDraft[net.dKey]}
+                                      onChange={(e) =>
+                                        setMetricsDraft({
+                                          ...metricsDraft,
+                                          [net.dKey]: e.target.value,
+                                        })
+                                      }
+                                      className="mt-0.5 w-full rounded-lg border border-[#CBD5E1] bg-white px-2 py-1 font-mono text-[11px] font-bold text-[#10B981] outline-none focus:border-[#0066C5]"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 2. Métricas Clave del Mes / Semana */}
+                      <div>
+                        <p className="mb-2.5 font-mono text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          2. Métricas Clave del Mes / Semana
+                        </p>
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                          <div>
+                            <label className="mb-1 block font-mono text-[10px] text-slate-600">
+                              Vistas Totales Reels
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={metricsDraft.reelViews}
+                              onChange={(e) =>
+                                setMetricsDraft({
+                                  ...metricsDraft,
+                                  reelViews: e.target.value,
+                                })
+                              }
+                              className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-2.5 font-mono text-xs font-bold text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block font-mono text-[10px] text-slate-600">
+                              Alcance Promedio
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={metricsDraft.avgReach}
+                              onChange={(e) =>
+                                setMetricsDraft({
+                                  ...metricsDraft,
+                                  avgReach: e.target.value,
+                                })
+                              }
+                              className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-2.5 font-mono text-xs font-bold text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block font-mono text-[10px] text-slate-600">
+                              Engagement (%)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              value={metricsDraft.engagementRate}
+                              onChange={(e) =>
+                                setMetricsDraft({
+                                  ...metricsDraft,
+                                  engagementRate: e.target.value,
+                                })
+                              }
+                              className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-2.5 font-mono text-xs font-bold text-[#0066C5] outline-none focus:border-[#0066C5] focus:bg-white"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block font-mono text-[10px] text-slate-600">
+                              Clics WhatsApp / Reservas
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={metricsDraft.whatsappClicks}
+                              onChange={(e) =>
+                                setMetricsDraft({
+                                  ...metricsDraft,
+                                  whatsappClicks: e.target.value,
+                                })
+                              }
+                              className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-2.5 font-mono text-xs font-bold text-[#10B981] outline-none focus:border-[#0066C5] focus:bg-white"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 3. Mejor Reel de la Semana (Título + Vistas) */}
+                      <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3.5">
+                        <p className="mb-2 font-mono text-[11px] font-bold uppercase tracking-wider text-[#0F172A]">
+                          3. Mejor Reel de la Semana (Título + Vistas)
+                        </p>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          <div className="sm:col-span-2">
+                            <label className="mb-1 block font-mono text-[10px] text-slate-500">
+                              Título / Tema del Mejor Reel
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Ej. Reel experiencia gastronómica / Antes y después corte..."
+                              value={metricsDraft.bestReelTitle}
+                              onChange={(e) =>
+                                setMetricsDraft({
+                                  ...metricsDraft,
+                                  bestReelTitle: e.target.value,
+                                })
+                              }
+                              className="w-full rounded-xl border border-[#CBD5E1] bg-white p-2.5 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5]"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block font-mono text-[10px] text-slate-500">
+                              Vistas del Mejor Reel
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={metricsDraft.bestReelViews}
+                              onChange={(e) =>
+                                setMetricsDraft({
+                                  ...metricsDraft,
+                                  bestReelViews: e.target.value,
+                                })
+                              }
+                              className="w-full rounded-xl border border-[#CBD5E1] bg-white p-2.5 font-mono text-xs font-bold text-[#0066C5] outline-none focus:border-[#0066C5]"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#E2E8F0] pt-4">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMetricsModalClientId(null);
+                            handleOpenClient360(modalClient.id, 'metrics');
+                          }}
+                          className="font-mono text-xs font-bold text-[#0066C5] hover:underline"
+                        >
+                          Abrir Vista 360° completa de {modalClient.name} →
+                        </button>
+
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setMetricsModalClientId(null)}
+                            className="rounded-xl px-4 py-2 font-mono text-xs text-slate-500 hover:text-[#0F172A]"
+                          >
+                            Cancelar
+                          </button>
+                          <motion.button
+                            type="submit"
+                            whileHover={{ y: -1 }}
+                            whileTap={{ scale: 0.96 }}
+                            transition={SPRING_TRANSITION}
+                            className="rounded-xl bg-[#0066C5] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-[#0052A3]"
+                          >
+                            Guardar Métricas Reales
+                          </motion.button>
+                        </div>
+                      </div>
+                    </form>
+                  </>
+                );
+              })()}
             </motion.div>
           </motion.div>
         )}
