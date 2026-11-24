@@ -11,6 +11,7 @@ import {
   Calendar as CalendarIcon,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Circle,
@@ -18,12 +19,12 @@ import {
   Code2,
   Copy,
   CreditCard,
-  DollarSign,
   ExternalLink,
   Eye,
   FileText,
   Film,
   Filter,
+  Flame,
   FolderGit2,
   Globe,
   LayoutDashboard,
@@ -35,77 +36,216 @@ import {
   Plus,
   RotateCcw,
   Search,
-  Sparkles,
   Trash2,
+  Trophy,
   Wallet,
   X,
+  Zap,
 } from 'lucide-react';
 import { auth, db, isFirebaseConfigured } from '../../firebase.js';
 import usePageMeta from '../../lib/usePageMeta.js';
 import { buildWhatsAppLink } from '../../lib/whatsapp.js';
 
 const SPRING_TRANSITION = { type: 'spring', stiffness: 400, damping: 25 };
+const MISSION_STAGES = ['Guion', 'Grabado', 'Editado', 'Publicado'];
+const QUEST_STATES = ['Pendiente', 'En Curso', 'Completado'];
+const WEEKLY_AGENCY_GOAL = 12;
+const XP_PER_LEVEL = 500;
 
-const getTodayDate = () => new Date().toISOString().split('T')[0];
-const getCurrentWeekLabel = () => {
-  const now = new Date();
-  return `Semana ${Math.ceil(now.getDate() / 7)} · Nov ${now.getFullYear()}`;
-};
+const QUEST_DIFFICULTIES = [
+  {
+    id: 'Guion',
+    label: 'Guion',
+    badgeLabel: '+100 XP · Guion',
+    xp: 100,
+    colorClass: 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300',
+  },
+  {
+    id: 'Grabación',
+    label: 'Grabación',
+    badgeLabel: '+150 XP · Grabación',
+    xp: 150,
+    colorClass: 'border-orange-500/40 bg-orange-500/15 text-orange-300',
+  },
+  {
+    id: 'Reel Publicado',
+    label: 'Reel Publicado',
+    badgeLabel: '+200 XP · Reel Publicado',
+    xp: 200,
+    colorClass: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300',
+  },
+];
+
+const CONFETTI_PARTICLES = Array.from({ length: 28 }, (_, i) => ({
+  id: i,
+  angle: (i / 28) * Math.PI * 2,
+  distance: 90 + (i % 5) * 45,
+  size: 6 + (i % 4) * 3,
+  color: ['#06B6D4', '#F97316', '#10B981', '#FACC15', '#38BDF8', '#FB923C'][i % 6],
+}));
 
 /**
- * Cálculo dinámico de fecha para tareas de sprint:
- * "Vence hoy", "Vence mañana", "En X días", o "Atrasada (X d)" en rojo tenue.
+ * Sintetizador Web Audio API sutil (0 dependencias externas) para feedback táctico RPG
  */
-function getDeadlineStatus(deadlineStr, todayDateStr) {
-  if (!deadlineStr) {
-    return {
-      label: 'Sin fecha',
-      colorClass: 'text-slate-500 bg-slate-100 border-slate-200',
-    };
-  }
+function playRpgSound(type = 'xp', enabled = true) {
+  if (!enabled || typeof window === 'undefined') return;
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
 
-  if (deadlineStr === todayDateStr) {
-    return {
-      label: 'Vence hoy',
-      isToday: true,
-      colorClass: 'text-amber-800 bg-amber-50 border-amber-200 font-semibold',
+    const playTone = (freq, startOffset, duration, gainVal = 0.06, wave = 'triangle') => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = wave;
+      osc.frequency.setValueAtTime(freq, now + startOffset);
+      gain.gain.setValueAtTime(0.001, now + startOffset);
+      gain.gain.exponentialRampToValueAtTime(gainVal, now + startOffset + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + startOffset + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + startOffset);
+      osc.stop(now + startOffset + duration);
     };
-  }
 
-  const [y1, m1, d1] = deadlineStr.split('-').map(Number);
-  const [y2, m2, d2] = todayDateStr.split('-').map(Number);
-  const t1 = Date.UTC(y1, m1 - 1, d1);
-  const t2 = Date.UTC(y2, m2 - 1, d2);
-  const diffDays = Math.round((t1 - t2) / (1000 * 60 * 60 * 24));
+    if (type === 'advance') {
+      playTone(440, 0, 0.09, 0.05, 'sine');
+      playTone(554.37, 0.06, 0.12, 0.05, 'sine');
+    } else if (type === 'heal') {
+      playTone(440, 0, 0.14, 0.06, 'sine');
+      playTone(554.37, 0.07, 0.16, 0.06, 'sine');
+      playTone(659.25, 0.14, 0.24, 0.07, 'triangle');
+    } else if (type === 'fanfare') {
+      playTone(523.25, 0, 0.13, 0.07, 'triangle');
+      playTone(659.25, 0.1, 0.13, 0.07, 'triangle');
+      playTone(783.99, 0.2, 0.15, 0.08, 'triangle');
+      playTone(1046.5, 0.32, 0.38, 0.09, 'triangle');
+    } else {
+      // 'xp'
+      playTone(587.33, 0, 0.11, 0.06, 'triangle');
+      playTone(880, 0.08, 0.2, 0.07, 'triangle');
+    }
+  } catch {
+    // Ignorar si el navegador bloquea autoplay de audio
+  }
+}
 
-  if (diffDays < 0) {
-    const abs = Math.abs(diffDays);
-    return {
-      label: abs === 1 ? 'Atrasada (ayer)' : `Atrasada (${abs}d)`,
-      isOverdue: true,
-      colorClass: 'text-rose-700 bg-rose-50 border-rose-200 font-semibold',
-    };
+const getTodayDate = () => new Date().toISOString().split('T')[0];
+
+/**
+ * Normaliza el nombre de cuenta para cruzar tareas de Zenda Agency, Dolciangel, La Lanchita y King's Barber Shop
+ * independientemente de tildes o variantes de escritura.
+ */
+function normalizeAccountKey(rawName) {
+  const s = String(rawName || '')
+    .toLowerCase()
+    .trim();
+  if (s.includes('zenda')) return 'zenda';
+  if (s.includes('dolci')) return 'dolciangel';
+  if (s.includes('lanchita')) return 'lalanchita';
+  if (s.includes('king') || s.includes('barber')) return 'kings';
+  return s;
+}
+
+/**
+ * Normaliza el responsable operativo diario: Kevin vs Marco
+ * (Mapea registros históricos de 'Angel' a 'Kevin' para mantener continuidad total).
+ */
+function normalizeAssignee(rawAssignee) {
+  const s = String(rawAssignee || '').trim().toLowerCase();
+  if (s === 'marco') return 'Marco';
+  return 'Kevin';
+}
+
+/**
+ * Obtiene la dificultad RPG de una misión (+100 XP Guion, +150 XP Grabación, +200 XP Reel Publicado)
+ */
+function getQuestDifficultyInfo(task) {
+  const raw = String(task?.questDifficulty || task?.stage || '').toLowerCase();
+  if (raw.includes('reel') || raw.includes('publicado')) {
+    return QUEST_DIFFICULTIES[2]; // +200 XP Reel Publicado
   }
-  if (diffDays === 1) {
-    return {
-      label: 'Vence mañana',
-      colorClass: 'text-sky-700 bg-sky-50 border-sky-200 font-medium',
-    };
+  if (raw.includes('grab')) {
+    return QUEST_DIFFICULTIES[1]; // +150 XP Grabación
   }
-  return {
-    label: `En ${diffDays} días`,
-    colorClass: 'text-slate-600 bg-slate-100 border-slate-200',
-  };
+  return QUEST_DIFFICULTIES[0]; // +100 XP Guion
+}
+
+/**
+ * Normaliza el estado RPG de una Quest:
+ * Pendiente → En Curso → Completado
+ */
+function getQuestRpgStatus(task) {
+  if (!task) return 'Pendiente';
+  if (task.questStatus && QUEST_STATES.includes(task.questStatus)) {
+    return task.questStatus;
+  }
+  if (task.completed || task.stage === 'Publicado') return 'Completado';
+  if (task.stage === 'Grabado' || task.stage === 'Editado') return 'En Curso';
+  return 'Pendiente';
+}
+
+/**
+ * Normaliza la etapa de cualquier tarea al flujo rápido de 1 clic:
+ * Guion → Grabado → Editado → Publicado
+ */
+function getMissionStage(task) {
+  if (!task) return 'Guion';
+  if (task.questStatus === 'Completado') return 'Publicado';
+  if (task.questStatus === 'En Curso' && (!task.stage || task.stage === 'Guion')) {
+    return 'Grabado';
+  }
+  if (task.stage && MISSION_STAGES.includes(task.stage)) {
+    return task.stage;
+  }
+  if (task.completed || task.stage === 'Publicado') return 'Publicado';
+  if (
+    task.stage === 'En edición / Agente' ||
+    task.stage === 'En Edición IA' ||
+    task.stage === 'Aprobado'
+  ) {
+    return 'Editado';
+  }
+  if (task.stage === 'Grabado') return 'Grabado';
+  return 'Guion';
 }
 
 // ============================================================================
-// 3 CLIENTES REALES OFICIALES DE ZENDA (ORDEN EXACTO Y CONTADORES EN 0)
+// 4 CUENTAS OFICIALES DE ZENDA (Zenda Agency, Dolciangel, La Lanchita, King's Barber Shop)
 // ============================================================================
 
 const OFFICIAL_INITIAL_CLIENTS = [
   {
-    id: 'client-dolciangel',
+    id: 'client-zenda-agency',
     order: 1,
+    name: 'Zenda Agency',
+    category: 'Growth Partner B2B & Marca Propia',
+    brandColors: ['#09090B', '#06B6D4', '#FFFFFF'],
+    story: 'Canal propio de autoridad, casos de éxito e ingeniería de contenido y automatización de Zenda.',
+    targetAudience: 'Dueños de negocios y empresas en crecimiento',
+    valueProp: 'Sistemas de adquisición, contenido audiovisual e IA aplicada a ventas.',
+    monthlyRetainer: 0,
+    currency: 'PEN',
+    billingDay: '01',
+    currentMonthPaid: 0,
+    webProgress: 100,
+    automationProgress: 100,
+    weeklyVideoGoal: 3,
+    videosPublicadosEstaSemana: 0,
+    health: 'En ritmo',
+    leadOwner: 'Kevin',
+    contact: '',
+    driveFolder: '',
+    githubRepo: '',
+    firebaseProjectId: 'zenda-db5d0',
+    n8nBotNumber: '',
+    techNotes: '',
+    createdAt: '2026-11-01T08:00:00.000Z',
+  },
+  {
+    id: 'client-dolciangel',
+    order: 2,
     name: 'Dolciangel',
     category: 'Pastelería & Cafetería de Especialidad',
     brandColors: ['#F3A6B2', '#2B1B17', '#FFF8F0'],
@@ -118,7 +258,7 @@ const OFFICIAL_INITIAL_CLIENTS = [
     currentMonthPaid: 0,
     webProgress: 0,
     automationProgress: 0,
-    weeklyVideoGoal: 4,
+    weeklyVideoGoal: 3,
     videosPublicadosEstaSemana: 0,
     health: 'En ritmo',
     leadOwner: 'Marco',
@@ -132,8 +272,8 @@ const OFFICIAL_INITIAL_CLIENTS = [
   },
   {
     id: 'client-lalanchita',
-    order: 2,
-    name: 'Lalanchita',
+    order: 3,
+    name: 'La Lanchita',
     category: 'Cevichería & Gastronomía Marina',
     brandColors: ['#005F73', '#EE9B00', '#FFFFFF'],
     story: 'Tradición marina, ceviches y platos marinos frescos en Chimbote y Nuevo Chimbote.',
@@ -148,7 +288,7 @@ const OFFICIAL_INITIAL_CLIENTS = [
     weeklyVideoGoal: 3,
     videosPublicadosEstaSemana: 0,
     health: 'En ritmo',
-    leadOwner: 'Angel',
+    leadOwner: 'Kevin',
     contact: '',
     driveFolder: '',
     githubRepo: '',
@@ -159,8 +299,8 @@ const OFFICIAL_INITIAL_CLIENTS = [
   },
   {
     id: 'client-kings-barber-shop',
-    order: 3,
-    name: 'King´s barber shop',
+    order: 4,
+    name: "King's Barber Shop",
     category: 'Barbería & Estilismo Masculino',
     brandColors: ['#111111', '#D4AF37', '#FFFFFF'],
     story: 'Servicio especializado de barbería, cortes modernos y cuidado de barba.',
@@ -175,7 +315,7 @@ const OFFICIAL_INITIAL_CLIENTS = [
     weeklyVideoGoal: 3,
     videosPublicadosEstaSemana: 0,
     health: 'En ritmo',
-    leadOwner: 'Angel',
+    leadOwner: 'Marco',
     contact: '',
     driveFolder: '',
     githubRepo: '',
@@ -186,21 +326,37 @@ const OFFICIAL_INITIAL_CLIENTS = [
   },
 ];
 
-// Ordenador consistente para mantener: 1) Dolciangel, 2) Lalanchita, 3) King´s barber shop
+// Ordenador consistente para mantener las 4 cuentas oficiales en orden
 function sortClientsOfficialOrder(list) {
   const priorityMap = {
-    dolciangel: 1,
-    lalanchita: 2,
-    'la lanchita': 2,
-    'king´s barber shop': 3,
-    "king's barber shop": 3,
+    zenda: 1,
+    dolciangel: 2,
+    lalanchita: 3,
+    kings: 4,
   };
   return [...list].sort((a, b) => {
-    const oa = a.order ?? priorityMap[(a.name || '').toLowerCase().trim()] ?? 99;
-    const ob = b.order ?? priorityMap[(b.name || '').toLowerCase().trim()] ?? 99;
+    const ka = normalizeAccountKey(a.name || a.id);
+    const kb = normalizeAccountKey(b.name || b.id);
+    const oa = priorityMap[ka] ?? a.order ?? 99;
+    const ob = priorityMap[kb] ?? b.order ?? 99;
     if (oa !== ob) return oa - ob;
     return (a.name || '').localeCompare(b.name || '');
   });
+}
+
+// Garantiza que las 4 cuentas oficiales siempre existan en el estado operativo
+function ensureFourOfficialAccounts(liveClients) {
+  const merged = [...liveClients];
+  for (const official of OFFICIAL_INITIAL_CLIENTS) {
+    const offKey = normalizeAccountKey(official.name);
+    const exists = merged.some(
+      (c) => c.id === official.id || normalizeAccountKey(c.name) === offKey,
+    );
+    if (!exists) {
+      merged.push(official);
+    }
+  }
+  return sortClientsOfficialOrder(merged);
 }
 
 // ============================================================================
@@ -209,8 +365,8 @@ function sortClientsOfficialOrder(list) {
 
 export default function AdminDashboard() {
   usePageMeta({
-    title: 'Zenda OS · Command Center & Clientes 360°',
-    description: 'Command Center operativo de Zenda: Clientes 360°, Taller de Guiones, Sprints, Calendario y Finanzas.',
+    title: 'Zenda OS · Centro de Control Operativo Diario',
+    description: 'Centro de Control Operativo diario de Zenda: Semáforo de Salud, Top 3 Misiones de Hoy (Kevin vs Marco), Motor de Racha y Clientes 360°.',
     noindex: true,
   });
 
@@ -234,7 +390,16 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('command');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Estados de colecciones reales (sin transacciones ni tareas falsas)
+  // Reloj en tiempo real (se actualiza cada 30 segundos) para el contador de 'Horas desde la última publicación'
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowMs(Date.now());
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Estados de colecciones reales
   const [zendaClients, setZendaClients] = useState(OFFICIAL_INITIAL_CLIENTS);
   const [scriptsList, setScriptsList] = useState([]);
   const [sprints, setSprints] = useState([]);
@@ -242,6 +407,97 @@ export default function AdminDashboard() {
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [finances, setFinances] = useState([]);
   const [inboundOnboardings, setInboundOnboardings] = useState([]);
+
+  // Estados del Tablero RPG / Videojuego Táctico (Solo Leveling + Linear)
+  const [quickMissionKevin, setQuickMissionKevin] = useState({
+    title: '',
+    client: 'Zenda Agency',
+    questDifficulty: 'Guion',
+    priority: 'Urgente',
+  });
+  const [quickMissionMarco, setQuickMissionMarco] = useState({
+    title: '',
+    client: 'Dolciangel',
+    questDifficulty: 'Grabación',
+    priority: 'Urgente',
+  });
+  const [expandedBacklogClients, setExpandedBacklogClients] = useState({});
+  const [backlogAssigneeFilter, setBacklogAssigneeFilter] = useState('all'); // 'all' | 'Kevin' | 'Marco'
+  const [backlogSearchQuery, setBacklogSearchQuery] = useState('');
+  const [backlogQuickInputs, setBacklogQuickInputs] = useState({});
+  const [celebrationBurst, setCelebrationBurst] = useState(false);
+  const [healedClientFlashId, setHealedClientFlashId] = useState(null);
+  const [floatingXpPopup, setFloatingXpPopup] = useState(null); // { player: 'Kevin' | 'Marco', amount: 150, label: '+150 XP' }
+  const [simulateBefore9AM, setSimulateBefore9AM] = useState(false);
+
+  // Estado RPG sincronizado en tiempo real con Firestore ('zenda_system/rpg_state')
+  // manteniendo localStorage ('zenda_rpg_os_v1') únicamente como caché rápida de arranque
+  const [rpgSyncOnline, setRpgSyncOnline] = useState(false);
+  const [rpgState, setRpgState] = useState(() => {
+    const defaults = {
+      kevinBaseXP: 1200,
+      marcoBaseXP: 1150,
+      kevinLevel: 3,
+      marcoLevel: 3,
+      kevinEarlyStreak: 4,
+      marcoEarlyStreak: 4,
+      kevinLastCheckIn: '',
+      marcoLastCheckIn: '',
+      weeklyRewardText: 'Cena Libre + Tarde Libre de Socios',
+      soundEnabled: true,
+      manualHoursOverride: {},
+      clientHpMap: {
+        'client-zenda-agency': 100,
+        'client-dolciangel': 100,
+        'client-lalanchita': 100,
+        'client-kings-barber-shop': 100,
+      },
+      manualBossReelsBonus: 0,
+      bossChestReelsCount: 0,
+      updatedAt: '',
+    };
+    try {
+      const raw = localStorage.getItem('zenda_rpg_os_v1');
+      if (!raw) return defaults;
+      return { ...defaults, ...JSON.parse(raw) };
+    } catch {
+      return defaults;
+    }
+  });
+
+  const persistRpgToFirestore = async (payload) => {
+    if (!isFirebaseConfigured || !db) return;
+    try {
+      const { doc, setDoc } = await import('firebase/firestore');
+      await setDoc(doc(db, 'zenda_system', 'rpg_state'), payload, { merge: true });
+    } catch (err) {
+      console.warn('[Firestore] Error sincronizando zenda_system/rpg_state:', err);
+    }
+  };
+
+  const updateRpgState = (updater) => {
+    setRpgState((prev) => {
+      const partial = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
+      const kevinXP = Number(partial.kevinBaseXP ?? prev.kevinBaseXP ?? 1200);
+      const marcoXP = Number(partial.marcoBaseXP ?? prev.marcoBaseXP ?? 1150);
+      const next = {
+        ...prev,
+        ...partial,
+        kevinBaseXP: kevinXP,
+        marcoBaseXP: marcoXP,
+        kevinLevel: Math.floor(kevinXP / XP_PER_LEVEL) + 1,
+        marcoLevel: Math.floor(marcoXP / XP_PER_LEVEL) + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      try {
+        localStorage.setItem('zenda_rpg_os_v1', JSON.stringify(next));
+      } catch {
+        // ignore localStorage cache errors
+      }
+      persistRpgToFirestore(next);
+      return next;
+    });
+  };
 
   // Estado de Clientes 360°
   const [selectedClient360Id, setSelectedClient360Id] = useState(null);
@@ -280,7 +536,7 @@ export default function AdminDashboard() {
     webProgress: 0,
     automationProgress: 0,
     weeklyVideoGoal: 3,
-    leadOwner: 'Angel',
+    leadOwner: 'Kevin',
     contact: '',
   });
 
@@ -288,8 +544,9 @@ export default function AdminDashboard() {
   const [sprintModalOpen, setSprintModalOpen] = useState(false);
   const [newSprint, setNewSprint] = useState(() => ({
     title: '',
-    client: 'Dolciangel',
-    assignee: 'Angel',
+    client: 'Zenda Agency',
+    assignee: 'Kevin',
+    stage: 'Guion',
     priority: 'Alta',
     deadline: getTodayDate(),
   }));
@@ -299,7 +556,7 @@ export default function AdminDashboard() {
     title: '',
     client: 'Dolciangel',
     stage: 'Guion listo',
-    assignee: 'Angel',
+    assignee: 'Kevin',
     publishDate: getTodayDate(),
     driveUrl: '',
   }));
@@ -311,7 +568,7 @@ export default function AdminDashboard() {
     type: 'Rodaje presencial',
     date: getTodayDate(),
     time: '10:00',
-    assignee: 'Angel',
+    assignee: 'Kevin',
     notes: '',
   }));
 
@@ -328,9 +585,7 @@ export default function AdminDashboard() {
 
   const [selectedOnboardingDetail, setSelectedOnboardingDetail] = useState(null);
 
-  // Filtros dinámicos (todos incluyen filtro por cliente real)
-  const [sprintFilter, setSprintFilter] = useState('all'); // all | Angel | Marco | pending
-  const [sprintClientFilter, setSprintClientFilter] = useState('all');
+  // Filtros dinámicos
   const [contentStageFilter, setContentStageFilter] = useState('all');
   const [contentClientFilter, setContentClientFilter] = useState('all');
   const [calendarTypeFilter, setCalendarTypeFilter] = useState('all');
@@ -342,7 +597,6 @@ export default function AdminDashboard() {
   // Calendario mensual
   const [currentCalendarDate, setCurrentCalendarDate] = useState(() => new Date());
   const [selectedCalendarDay, setSelectedCalendarDay] = useState(null);
-  const weekLabel = useMemo(() => getCurrentWeekLabel(), []);
   const todayDateStr = useMemo(() => getTodayDate(), []);
 
   // Toast helper
@@ -350,7 +604,14 @@ export default function AdminDashboard() {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage('');
-    }, 2400);
+    }, 2600);
+  };
+
+  const triggerCelebration = () => {
+    setCelebrationBurst(true);
+    setTimeout(() => {
+      setCelebrationBurst(false);
+    }, 3800);
   };
 
   // ============================================================================
@@ -360,6 +621,7 @@ export default function AdminDashboard() {
     if (!isFirebaseConfigured || !db) return;
 
     let unsubZendaClients;
+    let unsubRpgState;
     let unsubScripts;
     let unsubSprints;
     let unsubContent;
@@ -370,7 +632,69 @@ export default function AdminDashboard() {
 
     import('firebase/firestore').then(
       ({ collection, onSnapshot, query, orderBy, doc, setDoc }) => {
-        // 1. zenda_clients (Si está vacía, siembra automáticamente los 3 clientes reales)
+        // 0. zenda_system/rpg_state (Sincronización RPG en tiempo real Kevin <-> Marco)
+        try {
+          const rpgDocRef = doc(db, 'zenda_system', 'rpg_state');
+          unsubRpgState = onSnapshot(
+            rpgDocRef,
+            async (docSnap) => {
+              setRpgSyncOnline(true);
+              if (!docSnap.exists()) {
+                try {
+                  let seedPayload = rpgState;
+                  try {
+                    const cachedRaw = localStorage.getItem('zenda_rpg_os_v1');
+                    if (cachedRaw) {
+                      seedPayload = { ...rpgState, ...JSON.parse(cachedRaw) };
+                    }
+                  } catch {
+                    // ignore cache read error
+                  }
+                  await setDoc(
+                    rpgDocRef,
+                    {
+                      ...seedPayload,
+                      updatedAt: new Date().toISOString(),
+                    },
+                    { merge: true },
+                  );
+                } catch (seedErr) {
+                  console.warn('[Firestore] No se pudo inicializar zenda_system/rpg_state:', seedErr);
+                }
+              } else {
+                const cloudData = docSnap.data();
+                setRpgState((prev) => {
+                  const merged = {
+                    ...prev,
+                    ...cloudData,
+                    manualHoursOverride: {
+                      ...(prev.manualHoursOverride || {}),
+                      ...(cloudData.manualHoursOverride || {}),
+                    },
+                    clientHpMap: {
+                      ...(prev.clientHpMap || {}),
+                      ...(cloudData.clientHpMap || {}),
+                    },
+                  };
+                  try {
+                    localStorage.setItem('zenda_rpg_os_v1', JSON.stringify(merged));
+                  } catch {
+                    // ignore localStorage cache write error
+                  }
+                  return merged;
+                });
+              }
+            },
+            (err) => {
+              setRpgSyncOnline(false);
+              console.warn('[Firestore] zenda_system/rpg_state listener:', err);
+            },
+          );
+        } catch (e) {
+          console.warn('[Firestore] Error suscribiendo zenda_system/rpg_state:', e);
+        }
+
+        // 1. zenda_clients (Asegura las 4 cuentas oficiales: Zenda Agency, Dolciangel, La Lanchita, King's Barber Shop)
         try {
           const colClients = collection(db, 'zenda_clients');
           unsubZendaClients = onSnapshot(
@@ -391,7 +715,19 @@ export default function AdminDashboard() {
                   id: d.id,
                   ...d.data(),
                 }));
-                setZendaClients(sortClientsOfficialOrder(liveClients));
+                const completeClients = ensureFourOfficialAccounts(liveClients);
+                setZendaClients(completeClients);
+
+                // Si faltaba alguna de las 4 cuentas oficiales (ej. Zenda Agency), la sincroniza en Firestore
+                for (const official of OFFICIAL_INITIAL_CLIENTS) {
+                  const offKey = normalizeAccountKey(official.name);
+                  const found = liveClients.some(
+                    (c) => c.id === official.id || normalizeAccountKey(c.name) === offKey,
+                  );
+                  if (!found) {
+                    setDoc(doc(db, 'zenda_clients', official.id), official).catch(() => {});
+                  }
+                }
               }
             },
             (err) => console.warn('[Firestore] zenda_clients listener:', err),
@@ -537,6 +873,7 @@ export default function AdminDashboard() {
 
     return () => {
       if (unsubZendaClients) unsubZendaClients();
+      if (unsubRpgState) unsubRpgState();
       if (unsubScripts) unsubScripts();
       if (unsubSprints) unsubSprints();
       if (unsubContent) unsubContent();
@@ -545,6 +882,7 @@ export default function AdminDashboard() {
       if (unsubOnboarding) unsubOnboarding();
       if (unsubLeads) unsubLeads();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ============================================================================
@@ -554,6 +892,29 @@ export default function AdminDashboard() {
   const handleResetRealDatabase = async () => {
     setIsResettingBase(true);
     try {
+      const resetRpgPayload = {
+        kevinBaseXP: 1200,
+        marcoBaseXP: 1150,
+        kevinLevel: 3,
+        marcoLevel: 3,
+        kevinEarlyStreak: 4,
+        marcoEarlyStreak: 4,
+        kevinLastCheckIn: '',
+        marcoLastCheckIn: '',
+        weeklyRewardText: 'Cena Libre + Tarde Libre de Socios',
+        soundEnabled: true,
+        manualHoursOverride: {},
+        clientHpMap: {
+          'client-zenda-agency': 100,
+          'client-dolciangel': 100,
+          'client-lalanchita': 100,
+          'client-kings-barber-shop': 100,
+        },
+        manualBossReelsBonus: 0,
+        bossChestReelsCount: 0,
+        updatedAt: new Date().toISOString(),
+      };
+
       if (isFirebaseConfigured && db) {
         const { collection, getDocs, deleteDoc, doc, setDoc } = await import(
           'firebase/firestore'
@@ -574,14 +935,21 @@ export default function AdminDashboard() {
           await Promise.all(deletions);
         }
 
-        // Sembrar únicamente los 3 clientes reales oficiales con contadores en 0
-        await Promise.all(
-          OFFICIAL_INITIAL_CLIENTS.map((client) =>
+        // Sembrar las 4 cuentas oficiales con contadores en 0 y reiniciar zenda_system/rpg_state
+        await Promise.all([
+          ...OFFICIAL_INITIAL_CLIENTS.map((client) =>
             setDoc(doc(db, 'zenda_clients', client.id), client),
           ),
-        );
+          setDoc(doc(db, 'zenda_system', 'rpg_state'), resetRpgPayload),
+        ]);
       }
 
+      setRpgState(resetRpgPayload);
+      try {
+        localStorage.setItem('zenda_rpg_os_v1', JSON.stringify(resetRpgPayload));
+      } catch {
+        // ignore localStorage error
+      }
       setZendaClients(OFFICIAL_INITIAL_CLIENTS);
       setSprints([]);
       setContentList([]);
@@ -590,7 +958,7 @@ export default function AdminDashboard() {
       setScriptsList([]);
       setSelectedClient360Id(null);
       setResetModalOpen(false);
-      showToast('Base real reiniciada: Dolciangel, Lalanchita y King´s barber shop');
+      showToast("Base real y estado RPG reiniciados en Firestore (zenda_system/rpg_state)");
     } catch (err) {
       console.warn('[Firestore] Error al reiniciar base real:', err);
       showToast('Error al reiniciar base en Firestore');
@@ -756,7 +1124,7 @@ export default function AdminDashboard() {
       weeklyVideoGoal: Number(newClientForm.weeklyVideoGoal) || 3,
       videosPublicadosEstaSemana: 0,
       health: 'En ritmo',
-      leadOwner: newClientForm.leadOwner || 'Angel',
+      leadOwner: newClientForm.leadOwner || 'Kevin',
       contact: newClientForm.contact.trim() || '',
       driveFolder: newClientForm.driveFolder.trim() || '',
       githubRepo: '',
@@ -795,7 +1163,7 @@ export default function AdminDashboard() {
       webProgress: 0,
       automationProgress: 0,
       weeklyVideoGoal: 3,
-      leadOwner: 'Angel',
+      leadOwner: 'Kevin',
       contact: '',
     });
   };
@@ -862,17 +1230,25 @@ export default function AdminDashboard() {
 
     const wasPublished = script.status === 'Publicado';
     const nextStatus = wasPublished ? 'En Edición IA' : 'Publicado';
+    const nowIso = new Date().toISOString();
 
-    await handleUpdateScript(script.id, { status: nextStatus });
+    await handleUpdateScript(script.id, {
+      status: nextStatus,
+      ...(nextStatus === 'Publicado' ? { publishedAt: nowIso } : {}),
+    });
 
     const currentCount = Number(selectedClient360.videosPublicadosEstaSemana || 0);
     const nextCount = wasPublished ? Math.max(0, currentCount - 1) : currentCount + 1;
 
     await handleUpdateClientField(
       selectedClient360.id,
-      { videosPublicadosEstaSemana: nextCount },
+      {
+        videosPublicadosEstaSemana: nextCount,
+        ...(nextStatus === 'Publicado' ? { lastPublishedAt: nowIso, health: 'En ritmo' } : {}),
+      },
       wasPublished ? 'Guion desmarcado como publicado' : 'Guardado en Zenda OS (+1 video publicado)',
     );
+    setNowMs(Date.now());
   };
 
   const handleDeleteScript = async (scriptId) => {
@@ -913,22 +1289,366 @@ export default function AdminDashboard() {
   };
 
   // ============================================================================
-  // ACCIONES: SPRINTS, PIPELINE, CALENDARIO Y FINANZAS
+  // ACCIONES OPERATIVAS DIARIAS DE 1 CLIC (Guion → Grabado → Editado → Publicado)
   // ============================================================================
 
-  const handleToggleSprint = async (sprintId, currentCompleted) => {
-    const nextVal = !currentCompleted;
-    setSprints((prev) =>
-      prev.map((s) => (s.id === sprintId ? { ...s, completed: nextVal } : s)),
-    );
-    showToast('Guardado en Zenda OS');
+  const showFloatingXp = (player, amount, customLabel = null) => {
+    setFloatingXpPopup({
+      id: Date.now(),
+      player,
+      amount,
+      label: customLabel || `+${amount} XP`,
+    });
+    setTimeout(() => {
+      setFloatingXpPopup(null);
+    }, 2200);
+  };
 
-    if (isFirebaseConfigured && db && !sprintId.startsWith('local-sp-')) {
+  /**
+   * Avanza una Quest del Día en 1 clic:
+   * Pendiente → En Curso → Completado
+   * Suma XP en vivo (+100 XP Guion, +150 XP Grabación, +200 XP Reel Publicado),
+   * restaura HP del cliente al 100% al publicar y dispara confeti/sonido al cerrar las 3 misiones diarias.
+   */
+  const handleAdvanceQuestRpgState = async (task, explicitRpgStatus = null) => {
+    if (!task) return;
+    const currentRpg = getQuestRpgStatus(task);
+    const currentIdx = QUEST_STATES.indexOf(currentRpg);
+    const assignee = normalizeAssignee(task.assignee);
+    const diffInfo = getQuestDifficultyInfo(task);
+
+    let nextRpg = explicitRpgStatus;
+    if (!nextRpg) {
+      if (currentRpg === 'Completado') {
+        nextRpg = 'En Curso';
+      } else {
+        nextRpg = QUEST_STATES[Math.min(currentIdx + 1, QUEST_STATES.length - 1)];
+      }
+    }
+
+    if (nextRpg === currentRpg) return;
+
+    const isNowCompleted = nextRpg === 'Completado';
+    const wasCompleted = currentRpg === 'Completado';
+    const nextStage =
+      nextRpg === 'Completado'
+        ? 'Publicado'
+        : nextRpg === 'En Curso'
+        ? 'Grabado'
+        : 'Guion';
+    const nowIso = new Date().toISOString();
+
+    const updates = {
+      questStatus: nextRpg,
+      stage: nextStage,
+      completed: isNowCompleted,
+      updatedAt: nowIso,
+      ...(isNowCompleted
+        ? { publishedAt: nowIso, completedDate: todayDateStr }
+        : { publishedAt: null, completedDate: null }),
+    };
+
+    // Verificar cuántas misiones tenía completadas hoy este jugador antes de esta acción
+    const playerCompletedBefore = sprints.filter(
+      (s) =>
+        s.id !== task.id &&
+        normalizeAssignee(s.assignee) === assignee &&
+        getQuestRpgStatus(s) === 'Completado',
+    ).length;
+
+    setSprints((prev) =>
+      prev.map((s) => (s.id === task.id ? { ...s, ...updates } : s)),
+    );
+    setNowMs(Date.now());
+
+    // Actualizar XP del jugador en vivo
+    if (isNowCompleted && !wasCompleted) {
+      const xpKey = assignee === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
+      updateRpgState((prev) => ({
+        ...prev,
+        [xpKey]: Number(prev[xpKey] || 1000) + diffInfo.xp,
+      }));
+      showFloatingXp(assignee, diffInfo.xp, `+${diffInfo.xp} XP · ${diffInfo.label}`);
+
+      const newDoneCount = playerCompletedBefore + 1;
+      if (newDoneCount >= 3) {
+        playRpgSound('fanfare', rpgState.soundEnabled);
+        triggerCelebration();
+        showToast(`🏆 ¡${assignee} completó sus 3 Quests del Día! (+${diffInfo.xp} XP · BONUS DIARIO)`);
+      } else {
+        playRpgSound('xp', rpgState.soundEnabled);
+        showToast(`⚡ Quest Completada por ${assignee}: +${diffInfo.xp} XP (${diffInfo.label})`);
+      }
+    } else if (!isNowCompleted && wasCompleted) {
+      const xpKey = assignee === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
+      updateRpgState((prev) => ({
+        ...prev,
+        [xpKey]: Math.max(0, Number(prev[xpKey] || 1000) - diffInfo.xp),
+      }));
+      showToast(`Quest reabierta: En Curso (${task.client})`);
+    } else if (nextRpg === 'En Curso') {
+      playRpgSound('advance', rpgState.soundEnabled);
+      showToast(`⚔️ Quest En Curso: ${task.title} (${task.client})`);
+    }
+
+    // Si se completa la misión, restaurar el HP del cliente al 100% y actualizar contador semanal
+    const accountKey = normalizeAccountKey(task.client);
+    const matchingClient = zendaClients.find(
+      (c) => normalizeAccountKey(c.name) === accountKey,
+    );
+
+    if (matchingClient && (isNowCompleted || wasCompleted)) {
+      const isReelPub = diffInfo.id === 'Reel Publicado' || isNowCompleted;
+      const currentVidCount = Number(matchingClient.videosPublicadosEstaSemana || 0);
+      const nextVidCount = isNowCompleted
+        ? currentVidCount + 1
+        : Math.max(0, currentVidCount - 1);
+
+      if (isNowCompleted) {
+        setHealedClientFlashId(matchingClient.id);
+        setTimeout(() => setHealedClientFlashId(null), 2400);
+        updateRpgState((prev) => ({
+          ...prev,
+          manualHoursOverride: {
+            ...(prev.manualHoursOverride || {}),
+            [matchingClient.id]: 0,
+          },
+          clientHpMap: {
+            ...(prev.clientHpMap || {}),
+            [matchingClient.id]: 100,
+          },
+          bossChestReelsCount: Math.min(12, Number(prev.bossChestReelsCount || 0) + 1),
+        }));
+      }
+
+      if (isReelPub) {
+        await handleUpdateClientField(
+          matchingClient.id,
+          {
+            videosPublicadosEstaSemana: nextVidCount,
+            ...(isNowCompleted ? { lastPublishedAt: nowIso, health: 'En ritmo' } : {}),
+          },
+          '',
+        );
+      }
+    }
+
+    if (isFirebaseConfigured && db && !task.id.startsWith('local-sp-')) {
       try {
         const { doc, updateDoc } = await import('firebase/firestore');
-        await updateDoc(doc(db, 'zenda_sprints', sprintId), { completed: nextVal });
+        await updateDoc(doc(db, 'zenda_sprints', task.id), updates);
       } catch (err) {
-        console.warn('[Firestore] Error toggle sprint:', err);
+        console.warn('[Firestore] Error avanzando estado RPG de quest:', err);
+      }
+    }
+  };
+
+  /**
+   * Cambia la dificultad RPG de una Quest (+100 XP Guion | +150 XP Grabación | +200 XP Reel Publicado)
+   */
+  const handleChangeQuestDifficulty = async (task, nextDiffId) => {
+    if (!task) return;
+    setSprints((prev) =>
+      prev.map((s) => (s.id === task.id ? { ...s, questDifficulty: nextDiffId } : s)),
+    );
+    const info = QUEST_DIFFICULTIES.find((d) => d.id === nextDiffId) || QUEST_DIFFICULTIES[0];
+    showToast(`Clase de Quest: ${info.badgeLabel}`);
+
+    if (isFirebaseConfigured && db && !task.id.startsWith('local-sp-')) {
+      try {
+        const { doc, updateDoc } = await import('firebase/firestore');
+        await updateDoc(doc(db, 'zenda_sprints', task.id), { questDifficulty: nextDiffId });
+      } catch (err) {
+        console.warn('[Firestore] Error cambiando dificultad de quest:', err);
+      }
+    }
+  };
+
+  /**
+   * Publicar una pieza / Restaurar HP al 100% con efecto visual y sonido
+   */
+  const handleQuickMarkAccountPublishedNow = async (client) => {
+    if (!client) return;
+    const nowIso = new Date().toISOString();
+    const nextVidCount = Number(client.videosPublicadosEstaSemana || 0) + 1;
+    const owner = normalizeAssignee(client.leadOwner || 'Kevin');
+    const xpKey = owner === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
+
+    setHealedClientFlashId(client.id);
+    setTimeout(() => setHealedClientFlashId(null), 2600);
+    playRpgSound('heal', rpgState.soundEnabled);
+
+    updateRpgState((prev) => ({
+      ...prev,
+      [xpKey]: Number(prev[xpKey] || 1000) + 200,
+      manualHoursOverride: {
+        ...(prev.manualHoursOverride || {}),
+        [client.id]: 0,
+      },
+      clientHpMap: {
+        ...(prev.clientHpMap || {}),
+        [client.id]: 100,
+      },
+      bossChestReelsCount: Math.min(12, Number(prev.bossChestReelsCount || 0) + 1),
+    }));
+    showFloatingXp(owner, 200, `+200 XP · Reel Publicado (${client.name})`);
+
+    await handleUpdateClientField(
+      client.id,
+      {
+        lastPublishedAt: nowIso,
+        videosPublicadosEstaSemana: nextVidCount,
+        health: 'En ritmo',
+      },
+      `💚 ¡${client.name} restaurada al 100% HP! (+200 XP para ${owner})`,
+    );
+    setNowMs(Date.now());
+  };
+
+  /**
+   * Simulador táctico de desgaste de horas (0h=100% HP, 24h=75% HP, 48h=50% HP, 72h=25% HP Crítico)
+   */
+  const handleSetClientSimulatedHours = (clientId, hoursVal) => {
+    const newHp = Math.max(0, Math.min(100, Math.round(100 - (Number(hoursVal) / 24) * 25)));
+    updateRpgState((prev) => ({
+      ...prev,
+      manualHoursOverride: {
+        ...(prev.manualHoursOverride || {}),
+        [clientId]: hoursVal,
+      },
+      clientHpMap: {
+        ...(prev.clientHpMap || {}),
+        [clientId]: newHp,
+      },
+    }));
+  };
+
+  /**
+   * Botón de 'Check-in 8:30 AM +50 XP' (solo se habilita antes de las 9:00 AM o en modo simulación)
+   */
+  const handleMorningCheckIn = (player) => {
+    const currentHour = new Date(nowMs).getHours();
+    const isWindowOpen = currentHour < 9 || simulateBefore9AM;
+    if (!isWindowOpen) {
+      showToast('🔒 El Check-in 8:30 AM solo está habilitado antes de las 9:00 AM');
+      return;
+    }
+
+    const lastKey = player === 'Kevin' ? 'kevinLastCheckIn' : 'marcoLastCheckIn';
+    const streakKey = player === 'Kevin' ? 'kevinEarlyStreak' : 'marcoEarlyStreak';
+    const xpKey = player === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
+
+    if (rpgState[lastKey] === todayDateStr) {
+      showToast(`✅ ${player} ya registró su Check-in 8:30 AM hoy`);
+      return;
+    }
+
+    updateRpgState((prev) => ({
+      ...prev,
+      [lastKey]: todayDateStr,
+      [streakKey]: Number(prev[streakKey] || 0) + 1,
+      [xpKey]: Number(prev[xpKey] || 1000) + 50,
+    }));
+
+    playRpgSound('xp', rpgState.soundEnabled);
+    showFloatingXp(player, 50, '+50 XP · Check-in 8:30 AM');
+    showToast(`🌅 ¡Check-in 8:30 AM de ${player}! +50 XP y +1 día de racha temprana`);
+  };
+
+  /**
+   * Creación rápida inline de Quest (sin abrir modales) para Kevin, Marco o Backlog de cliente
+   */
+  const handleQuickCreateMissionInline = async ({
+    title,
+    client,
+    assignee,
+    questDifficulty = 'Guion',
+    priority = 'Urgente',
+    deadline = todayDateStr,
+    isTodayPinned = true,
+  }) => {
+    if (!title || !title.trim()) return;
+    const nowIso = new Date().toISOString();
+
+    const record = {
+      title: title.trim(),
+      client: client || 'Zenda Agency',
+      assignee: normalizeAssignee(assignee),
+      questDifficulty,
+      questStatus: 'Pendiente',
+      stage: 'Guion',
+      priority,
+      deadline,
+      isTodayPinned,
+      completed: false,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    if (isFirebaseConfigured && db) {
+      try {
+        const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+        await addDoc(collection(db, 'zenda_sprints'), {
+          ...record,
+          serverCreatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('[Firestore] Error quick create mission:', err);
+      }
+    } else {
+      setSprints((prev) => [{ id: `local-sp-${Date.now()}`, ...record }, ...prev]);
+    }
+
+    playRpgSound('advance', rpgState.soundEnabled);
+    showToast(`⚔️ Nueva Quest asignada a ${record.assignee} (${record.client})`);
+  };
+
+  /**
+   * Promueve en 1 clic un pendiente del Backlog a las 3 Quests del Día
+   */
+  const handlePromoteBacklogToToday = async (task) => {
+    if (!task) return;
+    const updates = {
+      deadline: todayDateStr,
+      priority: 'Urgente',
+      isTodayPinned: true,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setSprints((prev) =>
+      prev.map((s) => (s.id === task.id ? { ...s, ...updates } : s)),
+    );
+    playRpgSound('advance', rpgState.soundEnabled);
+    showToast(`⚡ Subida a Quests del Día (${normalizeAssignee(task.assignee)})`);
+
+    if (isFirebaseConfigured && db && !task.id.startsWith('local-sp-')) {
+      try {
+        const { doc, updateDoc } = await import('firebase/firestore');
+        await updateDoc(doc(db, 'zenda_sprints', task.id), updates);
+      } catch (err) {
+        console.warn('[Firestore] Error promoviendo misión a hoy:', err);
+      }
+    }
+  };
+
+  /**
+   * Cambia en 1 clic el jugador responsable de una Quest entre Kevin y Marco
+   */
+  const handleSwitchMissionAssignee = async (task) => {
+    if (!task) return;
+    const current = normalizeAssignee(task.assignee);
+    const nextAssignee = current === 'Kevin' ? 'Marco' : 'Kevin';
+    setSprints((prev) =>
+      prev.map((s) => (s.id === task.id ? { ...s, assignee: nextAssignee } : s)),
+    );
+    showToast(`Quest transferida a @${nextAssignee}`);
+
+    if (isFirebaseConfigured && db && !task.id.startsWith('local-sp-')) {
+      try {
+        const { doc, updateDoc } = await import('firebase/firestore');
+        await updateDoc(doc(db, 'zenda_sprints', task.id), { assignee: nextAssignee });
+      } catch (err) {
+        console.warn('[Firestore] Error cambiando responsable:', err);
       }
     }
   };
@@ -937,14 +1657,28 @@ export default function AdminDashboard() {
     e.preventDefault();
     if (!newSprint.title.trim()) return;
 
+    const isPub = newSprint.stage === 'Publicado';
+    const nowIso = new Date().toISOString();
+
     const record = {
       title: newSprint.title.trim(),
-      client: newSprint.client || zendaClients[0]?.name || 'Dolciangel',
-      assignee: newSprint.assignee,
+      client: newSprint.client || zendaClients[0]?.name || 'Zenda Agency',
+      assignee: normalizeAssignee(newSprint.assignee),
+      questDifficulty:
+        newSprint.stage === 'Publicado'
+          ? 'Reel Publicado'
+          : newSprint.stage === 'Grabado'
+          ? 'Grabación'
+          : 'Guion',
+      questStatus: isPub ? 'Completado' : newSprint.stage === 'Grabado' ? 'En Curso' : 'Pendiente',
+      stage: newSprint.stage || 'Guion',
       priority: newSprint.priority,
       deadline: newSprint.deadline,
-      completed: false,
-      createdAt: new Date().toISOString(),
+      isTodayPinned: newSprint.deadline === todayDateStr,
+      completed: isPub,
+      ...(isPub ? { publishedAt: nowIso, completedDate: todayDateStr } : {}),
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
 
     if (isFirebaseConfigured && db) {
@@ -963,18 +1697,19 @@ export default function AdminDashboard() {
 
     setNewSprint({
       title: '',
-      client: zendaClients[0]?.name || 'Dolciangel',
-      assignee: 'Angel',
+      client: zendaClients[0]?.name || 'Zenda Agency',
+      assignee: 'Kevin',
+      stage: 'Guion',
       priority: 'Alta',
       deadline: getTodayDate(),
     });
     setSprintModalOpen(false);
-    showToast('Guardado en Zenda OS');
+    showToast('Quest guardada en Zenda OS');
   };
 
   const handleDeleteSprint = async (id) => {
     setSprints((prev) => prev.filter((s) => s.id !== id));
-    showToast('Tarea eliminada');
+    showToast('Quest eliminada');
     if (isFirebaseConfigured && db && !id.startsWith('local-sp-')) {
       try {
         const { doc, deleteDoc } = await import('firebase/firestore');
@@ -988,15 +1723,17 @@ export default function AdminDashboard() {
   const handleAddContent = async (e) => {
     e.preventDefault();
     if (!newContent.title.trim() || !newContent.client.trim()) return;
+    const nowIso = new Date().toISOString();
 
     const record = {
       title: newContent.title.trim(),
       client: newContent.client.trim(),
       stage: newContent.stage,
-      assignee: newContent.assignee,
+      assignee: normalizeAssignee(newContent.assignee),
       publishDate: newContent.publishDate,
       driveUrl: newContent.driveUrl.trim() || '',
-      createdAt: new Date().toISOString(),
+      ...(newContent.stage === 'Publicado' ? { publishedAt: nowIso } : {}),
+      createdAt: nowIso,
     };
 
     if (isFirebaseConfigured && db) {
@@ -1017,7 +1754,7 @@ export default function AdminDashboard() {
       title: '',
       client: zendaClients[0]?.name || 'Dolciangel',
       stage: 'Guion listo',
-      assignee: 'Angel',
+      assignee: 'Kevin',
       publishDate: getTodayDate(),
       driveUrl: '',
     });
@@ -1026,14 +1763,41 @@ export default function AdminDashboard() {
   };
 
   const handleUpdateContentStage = async (id, newStage) => {
+    const nowIso = new Date().toISOString();
+    const targetItem = contentList.find((c) => c.id === id);
+    const updates = {
+      stage: newStage,
+      ...(newStage === 'Publicado' ? { publishedAt: nowIso } : {}),
+    };
+
     setContentList((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, stage: newStage } : c)),
+      prev.map((c) => (c.id === id ? { ...c, ...updates } : c)),
     );
+    setNowMs(Date.now());
+
+    if (newStage === 'Publicado' && targetItem) {
+      const accountKey = normalizeAccountKey(targetItem.client);
+      const matchingClient = zendaClients.find(
+        (c) => normalizeAccountKey(c.name) === accountKey,
+      );
+      if (matchingClient) {
+        await handleUpdateClientField(
+          matchingClient.id,
+          {
+            lastPublishedAt: nowIso,
+            videosPublicadosEstaSemana: Number(matchingClient.videosPublicadosEstaSemana || 0) + 1,
+            health: 'En ritmo',
+          },
+          '',
+        );
+      }
+    }
+
     showToast('Guardado en Zenda OS');
     if (isFirebaseConfigured && db && !id.startsWith('local-cnt-')) {
       try {
         const { doc, updateDoc } = await import('firebase/firestore');
-        await updateDoc(doc(db, 'zenda_content', id), { stage: newStage });
+        await updateDoc(doc(db, 'zenda_content', id), updates);
       } catch (err) {
         console.warn('[Firestore] Error update stage:', err);
       }
@@ -1104,7 +1868,7 @@ export default function AdminDashboard() {
       type: 'Rodaje presencial',
       date: getTodayDate(),
       time: '10:00',
-      assignee: 'Angel',
+      assignee: 'Kevin',
       notes: '',
     });
     setCalendarModalOpen(false);
@@ -1204,30 +1968,281 @@ export default function AdminDashboard() {
   };
 
   // ============================================================================
-  // CÁLCULOS Y KPIs
+  // CÁLCULOS RPG: BARRA DE SALUD (HP -25%/24H), PERFILES KEVIN/MARCO & QUESTS
   // ============================================================================
 
-  // Sprints
-  const completedSprintsCount = sprints.filter((s) => s.completed).length;
-  const totalSprintsCount = sprints.length;
-  const sprintProgressPercent =
-    totalSprintsCount > 0 ? Math.round((completedSprintsCount / totalSprintsCount) * 100) : 0;
+  // 1. BARRA DE SALUD (HP) DE LOS 4 CLIENTES:
+  // Empieza con 100% HP al publicar y pierde -25% HP por cada 24h sin publicación nueva.
+  // Verde >60%, Ámbar 30–60%, Rojo Crítico <30% con alerta de 'Cuenta en Peligro'.
+  const accountHealthCards = useMemo(() => {
+    return zendaClients.map((client) => {
+      const accountKey = normalizeAccountKey(client.name);
+      const timestamps = [];
 
-  const filteredSprints = sprints.filter((s) => {
-    const matchesAssignee =
-      sprintFilter === 'all' ||
-      (sprintFilter === 'Angel' && s.assignee === 'Angel') ||
-      (sprintFilter === 'Marco' && s.assignee === 'Marco') ||
-      (sprintFilter === 'pending' && !s.completed);
-    const matchesClient =
-      sprintClientFilter === 'all' || s.client === sprintClientFilter;
-    return matchesAssignee && matchesClient;
-  });
+      if (client.lastPublishedAt) {
+        const t = Date.parse(client.lastPublishedAt);
+        if (!Number.isNaN(t)) timestamps.push(t);
+      }
 
-  // Semáforo de salud sobre zendaClients
-  const accountsInRhythm = zendaClients.filter((c) => (c.health || 'En ritmo') === 'En ritmo').length;
-  const accountsAttention = zendaClients.filter((c) => c.health === 'Requiere atención').length;
-  const accountsDelayed = zendaClients.filter((c) => c.health === 'Demorado').length;
+      for (const sp of sprints) {
+        if (normalizeAccountKey(sp.client) === accountKey && getQuestRpgStatus(sp) === 'Completado') {
+          const rawTs = sp.publishedAt || sp.updatedAt || sp.createdAt || sp.deadline;
+          const t = rawTs ? Date.parse(rawTs) : NaN;
+          if (!Number.isNaN(t)) timestamps.push(t);
+        }
+      }
+
+      for (const cnt of contentList) {
+        if (normalizeAccountKey(cnt.client) === accountKey && cnt.stage === 'Publicado') {
+          const rawTs = cnt.publishedAt || cnt.updatedAt || cnt.publishDate || cnt.createdAt;
+          const t = rawTs ? Date.parse(rawTs) : NaN;
+          if (!Number.isNaN(t)) timestamps.push(t);
+        }
+      }
+
+      for (const sc of scriptsList) {
+        if (
+          (sc.clientId === client.id || normalizeAccountKey(sc.clientName) === accountKey) &&
+          sc.status === 'Publicado'
+        ) {
+          const rawTs = sc.publishedAt || sc.updatedAt;
+          const t = rawTs ? Date.parse(rawTs) : NaN;
+          if (!Number.isNaN(t)) timestamps.push(t);
+        }
+      }
+
+      const overrideHours = rpgState.manualHoursOverride?.[client.id];
+      const latestPublishedMs = timestamps.length > 0 ? Math.max(...timestamps) : null;
+      const diffMs = latestPublishedMs !== null ? Math.max(0, nowMs - latestPublishedMs) : null;
+      const computedHours =
+        diffMs !== null ? Math.floor(diffMs / (1000 * 60 * 60)) : null;
+
+      // Si hay override manual o timestamp real, calcula horas exactas; si aún no tiene registro,
+      // usa un valor inicial por cuenta para visualizar el sistema o 0h si ya publicó esta semana
+      const hasPublishedThisWeek = Number(client.videosPublicadosEstaSemana || 0) > 0;
+      const hoursSincePublish =
+        overrideHours !== undefined && overrideHours !== null
+          ? Number(overrideHours)
+          : computedHours !== null
+          ? computedHours
+          : hasPublishedThisWeek
+          ? 4
+          : 76;
+
+      // Fórmula RPG: 100% HP al publicar (0h), pierde -25% HP por cada 24h sin publicación nueva
+      const rawDecay = (hoursSincePublish / 24) * 25;
+      const hpPercent = Math.max(0, Math.min(100, Math.round(100 - rawDecay)));
+
+      // Estados visuales del HP:
+      // Verde (> 60% HP)
+      // Ámbar (30% - 60% HP)
+      // Rojo Crítico (< 30% HP · Cuenta en Peligro)
+      let statusKey = 'red';
+      let statusLabel = 'CUENTA EN PELIGRO';
+      if (hpPercent > 60) {
+        statusKey = 'green';
+        statusLabel = 'ESCUDO ÓPTIMO';
+      } else if (hpPercent >= 30) {
+        statusKey = 'amber';
+        statusLabel = 'DESGASTE ACTIVO';
+      }
+
+      const publishedSprintsForClient = sprints.filter(
+        (sp) =>
+          normalizeAccountKey(sp.client) === accountKey &&
+          getQuestRpgStatus(sp) === 'Completado',
+      ).length;
+      const publishedPieceCount = Math.max(
+        Number(client.videosPublicadosEstaSemana || 0),
+        publishedSprintsForClient,
+      );
+
+      return {
+        client,
+        accountKey,
+        hoursSincePublish,
+        hpPercent,
+        statusKey,
+        statusLabel,
+        publishedPieceCount,
+        weeklyGoal: Number(client.weeklyVideoGoal || 3),
+        isHealedFlashing: healedClientFlashId === client.id,
+      };
+    });
+  }, [
+    zendaClients,
+    sprints,
+    contentList,
+    scriptsList,
+    nowMs,
+    rpgState.manualHoursOverride,
+    healedClientFlashId,
+  ]);
+
+  // 2. QUESTS DEL DÍA (Máximo 3 misiones visibles por jugador: Kevin vs Marco)
+  const priorityWeight = (priority) => {
+    switch (priority) {
+      case 'Urgente':
+        return 1;
+      case 'Alta':
+        return 2;
+      case 'Media':
+        return 3;
+      default:
+        return 4;
+    }
+  };
+
+  const isCompletedToday = (task) => {
+    if (getQuestRpgStatus(task) !== 'Completado') return false;
+    if (task.completedDate === todayDateStr) return true;
+    if (task.publishedAt && String(task.publishedAt).startsWith(todayDateStr)) return true;
+    if (task.updatedAt && String(task.updatedAt).startsWith(todayDateStr)) return true;
+    if (task.deadline === todayDateStr) return true;
+    return false;
+  };
+
+  const buildAssigneeMissions = (targetAssignee) => {
+    const mine = sprints.filter((s) => normalizeAssignee(s.assignee) === targetAssignee);
+    const completedTodayList = mine.filter((s) => isCompletedToday(s));
+
+    const pendingList = mine
+      .filter((s) => getQuestRpgStatus(s) !== 'Completado')
+      .sort((a, b) => {
+        // Priorizar las que están 'En Curso' arriba
+        const aInCourse = getQuestRpgStatus(a) === 'En Curso' ? 0 : 1;
+        const bInCourse = getQuestRpgStatus(b) === 'En Curso' ? 0 : 1;
+        if (aInCourse !== bInCourse) return aInCourse - bInCourse;
+
+        const aToday = a.isTodayPinned || a.deadline <= todayDateStr ? 0 : 1;
+        const bToday = b.isTodayPinned || b.deadline <= todayDateStr ? 0 : 1;
+        if (aToday !== bToday) return aToday - bToday;
+
+        const pa = priorityWeight(a.priority);
+        const pb = priorityWeight(b.priority);
+        if (pa !== pb) return pa - pb;
+        return String(a.deadline || '').localeCompare(String(b.deadline || ''));
+      });
+
+    // Máximo 3 misiones visibles por jugador en el tablero principal
+    const top3 = [...pendingList, ...completedTodayList].slice(0, 3);
+    const top3Ids = new Set(top3.map((t) => t.id));
+    const remainingBacklog = mine.filter((t) => !top3Ids.has(t.id));
+
+    return {
+      top3,
+      top3Ids,
+      completedTodayCount: completedTodayList.length,
+      pendingCount: pendingList.length,
+      remainingBacklog,
+    };
+  };
+
+  const kevinMissionsData = useMemo(
+    () => buildAssigneeMissions('Kevin'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sprints, todayDateStr],
+  );
+
+  const marcoMissionsData = useMemo(
+    () => buildAssigneeMissions('Marco'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sprints, todayDateStr],
+  );
+
+  const activeTop3IdsSet = useMemo(() => {
+    const s = new Set();
+    kevinMissionsData.top3.forEach((t) => s.add(t.id));
+    marcoMissionsData.top3.forEach((t) => s.add(t.id));
+    return s;
+  }, [kevinMissionsData.top3, marcoMissionsData.top3]);
+
+  // 3. PERFILES DE JUGADOR (Nivel, Barra XP y Check-in 8:30 AM)
+  const currentLocalHour = new Date(nowMs).getHours();
+  const isBefore9AMWindow = currentLocalHour < 9 || simulateBefore9AM;
+
+  const kevinTotalXP = Number(rpgState.kevinBaseXP || 1200);
+  const kevinLevel = Math.floor(kevinTotalXP / XP_PER_LEVEL) + 1;
+  const kevinLevelXP = kevinTotalXP % XP_PER_LEVEL;
+  const kevinLevelPercent = Math.round((kevinLevelXP / XP_PER_LEVEL) * 100);
+  const kevinCheckedInToday = rpgState.kevinLastCheckIn === todayDateStr;
+
+  const marcoTotalXP = Number(rpgState.marcoBaseXP || 1150);
+  const marcoLevel = Math.floor(marcoTotalXP / XP_PER_LEVEL) + 1;
+  const marcoLevelXP = marcoTotalXP % XP_PER_LEVEL;
+  const marcoLevelPercent = Math.round((marcoLevelXP / XP_PER_LEVEL) * 100);
+  const marcoCheckedInToday = rpgState.marcoLastCheckIn === todayDateStr;
+
+  // 4. COFRE DE RECOMPENSA SEMANAL (BOSS FIGHT: X / 12 Reels Publicados esta semana)
+  const weeklyPublishedCount = useMemo(() => {
+    const sumByAccounts = accountHealthCards.reduce(
+      (acc, card) => acc + card.publishedPieceCount,
+      0,
+    );
+    const totalPublishedSprints = sprints.filter(
+      (s) => getQuestRpgStatus(s) === 'Completado',
+    ).length;
+    const baseCount = Math.max(sumByAccounts, totalPublishedSprints);
+    return Math.max(
+      0,
+      Math.min(12, baseCount + Number(rpgState.manualBossReelsBonus || 0)),
+    );
+  }, [accountHealthCards, sprints, rpgState.manualBossReelsBonus]);
+
+  const weeklyGoalPercent = Math.min(
+    100,
+    Math.round((weeklyPublishedCount / WEEKLY_AGENCY_GOAL) * 100),
+  );
+  const isBossChestUnlocked = weeklyPublishedCount >= WEEKLY_AGENCY_GOAL;
+
+  // 4. BACKLOG COLAPSADO POR CLIENTE (Debajo de las misiones de hoy)
+  const backlogByClient = useMemo(() => {
+    return zendaClients.map((client) => {
+      const accountKey = normalizeAccountKey(client.name);
+      const allClientTasks = sprints.filter(
+        (s) => normalizeAccountKey(s.client) === accountKey,
+      );
+
+      // Tareas que no están en el Top 3 activo de hoy (o que coinciden con filtros del backlog)
+      const filteredTasks = allClientTasks.filter((task) => {
+        const assignee = normalizeAssignee(task.assignee);
+        const matchesAssignee =
+          backlogAssigneeFilter === 'all' || assignee === backlogAssigneeFilter;
+        const matchesQuery =
+          !backlogSearchQuery.trim() ||
+          String(task.title || '')
+            .toLowerCase()
+            .includes(backlogSearchQuery.toLowerCase());
+        return matchesAssignee && matchesQuery;
+      });
+
+      const pendingBacklogOnly = filteredTasks.filter(
+        (t) => !activeTop3IdsSet.has(t.id) && getMissionStage(t) !== 'Publicado',
+      );
+
+      const stageCounts = {
+        Guion: allClientTasks.filter((t) => getMissionStage(t) === 'Guion').length,
+        Grabado: allClientTasks.filter((t) => getMissionStage(t) === 'Grabado').length,
+        Editado: allClientTasks.filter((t) => getMissionStage(t) === 'Editado').length,
+        Publicado: allClientTasks.filter((t) => getMissionStage(t) === 'Publicado').length,
+      };
+
+      return {
+        client,
+        accountKey,
+        allClientTasks,
+        filteredTasks,
+        pendingBacklogCount: pendingBacklogOnly.length,
+        stageCounts,
+      };
+    });
+  }, [
+    zendaClients,
+    sprints,
+    activeTop3IdsSet,
+    backlogAssigneeFilter,
+    backlogSearchQuery,
+  ]);
 
   // Pipeline de Contenido
   const contentStages = ['Guion listo', 'Por grabar', 'En edición / Agente', 'Aprobado', 'Publicado'];
@@ -1314,19 +2329,6 @@ export default function AdminDashboard() {
     }
   };
 
-  const getPriorityBadge = (priority) => {
-    switch (priority) {
-      case 'Urgente':
-        return 'border-rose-200 bg-rose-50 text-rose-700 font-semibold';
-      case 'Alta':
-        return 'border-amber-200 bg-amber-50 text-amber-800 font-medium';
-      case 'Media':
-        return 'border-sky-200 bg-sky-50 text-sky-700';
-      default:
-        return 'border-slate-200 bg-slate-100 text-slate-600';
-    }
-  };
-
   const getStageBadge = (stage) => {
     switch (stage) {
       case 'Guion listo':
@@ -1404,7 +2406,62 @@ export default function AdminDashboard() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-[#F8FAFC] font-sans text-[#0F172A] antialiased selection:bg-cyan-500 selection:text-white">
+    <div
+      className={`flex min-h-screen font-sans antialiased selection:bg-cyan-500 selection:text-white ${
+        activeTab === 'command'
+          ? 'bg-[#060911] text-slate-100'
+          : 'bg-[#F8FAFC] text-[#0F172A]'
+      }`}
+    >
+      {/* Explosión de Confeti Neón al cerrar las 3 Quests del Día o Desbloquear el Cofre 12/12 */}
+      <AnimatePresence>
+        {celebrationBurst && (
+          <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center overflow-hidden">
+            {CONFETTI_PARTICLES.map((p) => (
+              <motion.span
+                key={`confetti-${p.id}`}
+                initial={{ opacity: 1, x: 0, y: 0, scale: 0.4, rotate: 0 }}
+                animate={{
+                  opacity: [1, 1, 0],
+                  x: Math.cos(p.angle) * p.distance * 1.9,
+                  y: Math.sin(p.angle) * p.distance * 1.6 - 40,
+                  scale: [0.6, 1.35, 0.8],
+                  rotate: p.id * 45 + 180,
+                }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 1.35, ease: 'easeOut' }}
+                style={{
+                  width: p.size,
+                  height: p.size,
+                  backgroundColor: p.color,
+                  boxShadow: `0 0 12px ${p.color}`,
+                }}
+                className="absolute rounded-sm"
+              />
+            ))}
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Popup flotante de +XP ganado en vivo */}
+      <AnimatePresence>
+        {floatingXpPopup && (
+          <motion.div
+            key={`xp-pop-${floatingXpPopup.id}`}
+            initial={{ opacity: 0, y: 24, scale: 0.85 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.9 }}
+            transition={SPRING_TRANSITION}
+            className="pointer-events-none fixed bottom-20 right-6 z-50 flex items-center gap-2.5 rounded-2xl border border-orange-500/60 bg-[#0B101D]/95 px-4 py-2.5 font-mono text-xs font-extrabold text-orange-400 shadow-[0_0_25px_rgba(249,115,22,0.45)]"
+          >
+            <Zap className="h-4 w-4 text-orange-400" />
+            <span>
+              [{floatingXpPopup.player}] {floatingXpPopup.label}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Toast flotante animado en esquina inferior derecha */}
       <AnimatePresence>
         {toastMessage && (
@@ -1414,13 +2471,13 @@ export default function AdminDashboard() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.94 }}
             transition={SPRING_TRANSITION}
-            className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl border border-zinc-800 bg-[#09090B] px-4 py-3 font-mono text-xs font-semibold text-white shadow-2xl"
+            className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl border border-cyan-500/40 bg-[#090D16] px-4 py-3 font-mono text-xs font-semibold text-white shadow-[0_0_24px_rgba(6,182,212,0.25)]"
           >
             <motion.span
               initial={{ scale: 0.6 }}
               animate={{ scale: [1, 1.25, 1] }}
               transition={{ duration: 0.35 }}
-              className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400"
+              className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/20 text-cyan-400"
             >
               <Check className="h-3.5 w-3.5" />
             </motion.span>
@@ -1430,24 +2487,35 @@ export default function AdminDashboard() {
       </AnimatePresence>
 
       {/* ==================================================================== */}
-      {/* SIDEBAR DARK (#09090B) CON DESLIZAMIENTO 'layoutId'                   */}
+      {/* SIDEBAR TÁCTICO DARK (#07090F) CON DESLIZAMIENTO 'layoutId'          */}
       {/* ==================================================================== */}
-      <aside className="hidden w-64 flex-col border-r border-[#27272A] bg-[#09090B] p-5 md:flex select-none">
+      <aside className="hidden w-64 flex-col border-r border-slate-800/80 bg-[#07090F] p-5 md:flex select-none">
         {/* Marca & Status */}
         <div className="flex items-center justify-between px-2">
           <div className="flex items-center gap-2.5">
             <img src="/isotipo-zenda.png" alt="Zenda" className="h-6 w-auto object-contain brightness-110" />
             <span className="text-base font-bold tracking-tight text-white">zenda</span>
-            <span className="rounded border border-zenda-cyan/50 bg-zenda-cyan/15 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest text-zenda-cyan">
-              OS
+            <span className="rounded border border-cyan-400/50 bg-cyan-500/15 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.25)]">
+              RPG·OS
             </span>
           </div>
         </div>
 
         <div className="mt-3 px-2">
-          <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2.5 py-1.5 font-mono text-[10px] text-zinc-400">
-            <span className={`h-2 w-2 rounded-full ${isFirebaseConfigured ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-amber-400'}`} />
-            <span className="truncate">{isFirebaseConfigured ? 'Cloud Sync Activo' : 'Modo Local'}</span>
+          <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/70 px-2.5 py-1.5 font-mono text-[10px] text-slate-400">
+            <div className="flex items-center gap-2 truncate">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  rpgSyncOnline && isFirebaseConfigured
+                    ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]'
+                    : 'bg-amber-400'
+                }`}
+              />
+              <span className="truncate">
+                {rpgSyncOnline ? 'RPG CLOUD SYNC' : 'CACHE LOCAL'}
+              </span>
+            </div>
+            <span className="text-orange-400 font-bold">S-RANK</span>
           </div>
         </div>
 
@@ -1467,21 +2535,21 @@ export default function AdminDashboard() {
                 className={`relative flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-mono font-medium tracking-wide transition-colors ${
                   isActive
                     ? 'text-white font-semibold'
-                    : 'text-[#A1A1AA] hover:text-white'
+                    : 'text-slate-400 hover:text-white'
                 }`}
               >
                 {isActive && (
                   <motion.div
                     layoutId="sidebarActiveNavIndicator"
                     transition={SPRING_TRANSITION}
-                    className="absolute inset-0 rounded-xl bg-white/10"
+                    className="absolute inset-0 rounded-xl border border-cyan-500/35 bg-gradient-to-r from-cyan-500/15 to-orange-500/10 shadow-[0_0_15px_rgba(6,182,212,0.12)]"
                   />
                 )}
                 <div className="relative z-10 flex items-center gap-3">
-                  <IconComponent className={`h-4 w-4 ${isActive ? item.accent : 'text-zinc-400'}`} />
+                  <IconComponent className={`h-4 w-4 ${isActive ? item.accent : 'text-slate-500'}`} />
                   <span>{item.label}</span>
                 </div>
-                <span className="relative z-10 rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-mono text-zinc-300">
+                <span className="relative z-10 rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] font-mono text-slate-300">
                   {item.badge}
                 </span>
               </motion.button>
@@ -1489,13 +2557,13 @@ export default function AdminDashboard() {
           })}
         </nav>
 
-        {/* Acceso rápido a las 3 cuentas reales en el Sidebar */}
-        <div className="mb-4 border-t border-[#27272A] pt-4">
-          <p className="px-2 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-            Cuentas Oficiales ({zendaClients.length})
+        {/* Acceso rápido a las 4 cuentas oficiales con indicador de HP en el Sidebar */}
+        <div className="mb-4 border-t border-slate-800/80 pt-4">
+          <p className="px-2 font-mono text-[10px] uppercase tracking-wider text-slate-500">
+            HP de Cuentas ({accountHealthCards.length})
           </p>
           <div className="mt-2 space-y-1">
-            {zendaClients.map((client) => (
+            {accountHealthCards.map(({ client, hpPercent, statusKey }) => (
               <motion.button
                 key={client.id}
                 type="button"
@@ -1506,7 +2574,7 @@ export default function AdminDashboard() {
                 className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
                   activeTab === 'clients' && selectedClient360Id === client.id
                     ? 'bg-white/10 text-white font-semibold'
-                    : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white'
+                    : 'text-slate-400 hover:bg-white/[0.04] hover:text-white'
                 }`}
               >
                 <div className="flex items-center gap-2 truncate">
@@ -1516,8 +2584,16 @@ export default function AdminDashboard() {
                   />
                   <span className="truncate">{client.name}</span>
                 </div>
-                <span className="font-mono text-[10px] text-zinc-500">
-                  {client.videosPublicadosEstaSemana ?? 0}/{client.weeklyVideoGoal ?? 3}v
+                <span
+                  className={`font-mono text-[10px] font-bold ${
+                    statusKey === 'green'
+                      ? 'text-emerald-400'
+                      : statusKey === 'amber'
+                      ? 'text-amber-400'
+                      : 'text-rose-400'
+                  }`}
+                >
+                  {hpPercent}% HP
                 </span>
               </motion.button>
             ))}
@@ -1525,11 +2601,11 @@ export default function AdminDashboard() {
         </div>
 
         {/* Footer Sidebar */}
-        <div className="space-y-3 border-t border-[#27272A] pt-4">
+        <div className="space-y-3 border-t border-slate-800/80 pt-4">
           <Link
             to="/"
             target="_blank"
-            className="flex items-center justify-between rounded-xl px-3 py-2 text-xs text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-white"
+            className="flex items-center justify-between rounded-xl px-3 py-2 text-xs text-slate-400 transition-colors hover:bg-white/[0.04] hover:text-white"
           >
             <span className="flex items-center gap-2">
               <Globe className="h-3.5 w-3.5" />
@@ -1538,16 +2614,16 @@ export default function AdminDashboard() {
             <ExternalLink className="h-3 w-3" />
           </Link>
 
-          <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 text-xs">
+          <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-xs">
             <div className="truncate">
-              <p className="font-semibold text-white">{currentUser?.displayName || 'Equipo Fundador'}</p>
-              <p className="truncate font-mono text-[11px] text-zinc-400">{currentUser?.email || 'admin@wearezenda.com'}</p>
+              <p className="font-semibold text-white">{currentUser?.displayName || 'Party: Kevin & Marco'}</p>
+              <p className="truncate font-mono text-[11px] text-slate-400">{currentUser?.email || 'admin@wearezenda.com'}</p>
             </div>
             <button
               type="button"
               onClick={handleLogout}
               title="Cerrar Sesión"
-              className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-white/10 hover:text-rose-400"
+              className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-rose-400"
             >
               <LogOut className="h-4 w-4" />
             </button>
@@ -1556,66 +2632,217 @@ export default function AdminDashboard() {
       </aside>
 
       {/* ==================================================================== */}
-      {/* CONTENIDO PRINCIPAL: LIGHT WORKSPACE (#F8FAFC)                       */}
+      {/* CONTENIDO PRINCIPAL + HEADER GLOBAL CON COFRE BOSS FIGHT SEMANAL     */}
       {/* ==================================================================== */}
       <div className="flex flex-1 flex-col overflow-y-auto">
-        {/* Header Superior Blanco (#FFFFFF) con botón discreto "Reiniciar Base Real" */}
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[#E2E8F0] bg-white px-6 shadow-sm">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 md:hidden"
-            >
-              {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </button>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-xs font-bold uppercase tracking-widest text-cyan-600">ZENDA OS</span>
-              <span className="text-slate-300">/</span>
-              <h1 className="font-mono text-xs font-semibold uppercase tracking-wider text-[#0F172A]">
-                {activeTab === 'command' && 'Command Center · Foco Semanal & Cuentas'}
-                {activeTab === 'clients' &&
-                  (selectedClient360
-                    ? `Clientes 360° · ${selectedClient360.name}`
-                    : 'Clientes 360° · Portafolio Oficial')}
-                {activeTab === 'pipeline' && 'Pipeline Audiovisual · Reels & Contenido'}
-                {activeTab === 'calendar' && 'Calendario Operativo · Rodajes, Publicaciones & Cobros'}
-                {activeTab === 'finances' && 'Finanzas & Caja Neta · Sincronización Bidireccional'}
-              </h1>
+        {/* Header Global Táctico con Cofre de Recompensa Semanal (Boss Fight: X / 12 Reels) */}
+        <header className="sticky top-0 z-30 border-b border-slate-800/90 bg-[#080C15]/95 px-4 py-3 text-white shadow-lg backdrop-blur-md sm:px-6">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            {/* Izquierda: Título del Sistema + Menú Móvil */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                  className="rounded-lg border border-slate-800 bg-slate-900 p-2 text-slate-300 hover:text-white md:hidden"
+                >
+                  {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                </button>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded border border-cyan-500/40 bg-cyan-500/15 px-1.5 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-widest text-cyan-400">
+                      SYSTEM HUD
+                    </span>
+                    <h1 className="font-mono text-xs font-bold uppercase tracking-wider text-white sm:text-sm">
+                      {activeTab === 'command' && 'Zenda Tactical RPG · Quests & HP de Cuentas'}
+                      {activeTab === 'clients' &&
+                        (selectedClient360
+                          ? `Clientes 360° · ${selectedClient360.name}`
+                          : 'Clientes 360° · Portafolio Oficial')}
+                      {activeTab === 'pipeline' && 'Pipeline Audiovisual · Reels & Contenido'}
+                      {activeTab === 'calendar' && 'Calendario Operativo · Rodajes & Cobros'}
+                      {activeTab === 'finances' && 'Finanzas & Caja Neta · Sincronización'}
+                    </h1>
+                  </div>
+                </div>
+              </div>
+
+              {/* Controles rápidos móvil */}
+              <div className="flex items-center gap-1.5 xl:hidden">
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateRpgState((prev) => ({ ...prev, soundEnabled: !prev.soundEnabled }))
+                  }
+                  className={`rounded-lg border px-2 py-1 font-mono text-[10px] font-bold ${
+                    rpgState.soundEnabled
+                      ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300'
+                      : 'border-slate-800 bg-slate-900 text-slate-500'
+                  }`}
+                >
+                  {rpgState.soundEnabled ? '🔊 SFX' : '🔇 MUTE'}
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-2.5">
-            <div className="hidden items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-mono text-[11px] text-slate-600 lg:flex">
-              <Clock className="h-3 w-3 text-slate-400" />
-              <span>{weekLabel}</span>
+            {/* 4. COFRE DE RECOMPENSA SEMANAL (BOSS FIGHT: X / 12 Reels Publicados esta semana) */}
+            <div
+              className={`flex flex-1 flex-col gap-2 rounded-2xl border px-3.5 py-2.5 transition-all xl:max-w-2xl ${
+                isBossChestUnlocked
+                  ? 'border-amber-400/80 bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-cyan-500/20 shadow-[0_0_25px_rgba(245,158,11,0.3)]'
+                  : 'border-slate-800 bg-[#0D1322]/90'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <motion.span
+                    animate={
+                      isBossChestUnlocked
+                        ? { rotate: [0, -10, 10, -8, 8, 0], scale: [1, 1.18, 1] }
+                        : { scale: 1 }
+                    }
+                    transition={{ duration: 0.7 }}
+                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border font-mono text-xs ${
+                      isBossChestUnlocked
+                        ? 'border-amber-300 bg-amber-400 text-slate-950 shadow-[0_0_15px_rgba(251,191,36,0.7)]'
+                        : 'border-orange-500/40 bg-orange-500/15 text-orange-400'
+                    }`}
+                  >
+                    <Trophy className="h-4 w-4" />
+                  </motion.span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] font-extrabold uppercase tracking-wider text-orange-400">
+                        {isBossChestUnlocked
+                          ? '🔓 ¡BOSS DERROTADO! COFRE SEMANAL DESBLOQUEADO'
+                          : '⚔️ BOSS FIGHT · COFRE DE RECOMPENSA SEMANAL'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-[10px] text-slate-400">Recompensa:</span>
+                      <input
+                        type="text"
+                        value={rpgState.weeklyRewardText}
+                        onChange={(e) =>
+                          updateRpgState({ weeklyRewardText: e.target.value })
+                        }
+                        aria-label="Recompensa semanal acordada entre socios"
+                        className="w-44 sm:w-60 rounded border border-transparent bg-transparent px-1 py-0.5 font-mono text-[11px] font-bold text-amber-300 outline-none hover:border-slate-700 focus:border-cyan-400 focus:bg-slate-900"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="text-right font-mono">
+                    <span
+                      className={`text-sm font-extrabold ${
+                        isBossChestUnlocked ? 'text-amber-300' : 'text-cyan-400'
+                      }`}
+                    >
+                      {weeklyPublishedCount} / {WEEKLY_AGENCY_GOAL}
+                    </span>
+                    <span className="ml-1 text-[10px] text-slate-400">Reels Sem.</span>
+                  </div>
+
+                  {/* Controles rápidos +/-1 Reel para sincronizar/probar el desbloqueo del Cofre 12/12 */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateRpgState((prev) => ({
+                          ...prev,
+                          manualBossReelsBonus: Number(prev.manualBossReelsBonus || 0) - 1,
+                        }))
+                      }
+                      className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-slate-900 font-mono text-xs font-bold text-slate-300 hover:border-slate-500 hover:text-white"
+                      title="Restar 1 reel al contador semanal"
+                    >
+                      -
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextVal = weeklyPublishedCount + 1;
+                        updateRpgState((prev) => ({
+                          ...prev,
+                          manualBossReelsBonus: Number(prev.manualBossReelsBonus || 0) + 1,
+                        }));
+                        if (nextVal >= WEEKLY_AGENCY_GOAL) {
+                          playRpgSound('fanfare', rpgState.soundEnabled);
+                          triggerCelebration();
+                          showToast(
+                            `🔓 ¡12/12 REELS! Cofre Semanal Desbloqueado: ${rpgState.weeklyRewardText}`,
+                          );
+                        } else {
+                          playRpgSound('xp', rpgState.soundEnabled);
+                        }
+                      }}
+                      className="flex h-6 w-6 items-center justify-center rounded-md border border-orange-500/40 bg-orange-500/20 font-mono text-xs font-bold text-orange-300 hover:bg-orange-500/30"
+                      title="Sumar +1 reel publicado al Cofre Semanal"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Barra Global Animada del Cofre Boss Fight (X / 12) */}
+              <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-slate-950 p-0.5 ring-1 ring-slate-800">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${weeklyGoalPercent}%` }}
+                  transition={{ duration: 0.6, ease: 'easeOut' }}
+                  className={`h-full rounded-full ${
+                    isBossChestUnlocked
+                      ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-emerald-400 shadow-[0_0_12px_rgba(251,191,36,0.8)]'
+                      : 'bg-gradient-to-r from-orange-500 via-amber-400 to-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.5)]'
+                  }`}
+                />
+              </div>
             </div>
 
-            {/* Botón discreto en el header: "Reiniciar Base Real" */}
-            <motion.button
-              type="button"
-              whileHover={{ y: -1 }}
-              whileTap={{ scale: 0.96 }}
-              transition={SPRING_TRANSITION}
-              onClick={() => setResetModalOpen(true)}
-              title="Purgar registros de prueba y dejar únicamente Dolciangel, Lalanchita y King´s barber shop en 0"
-              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-[11px] font-medium text-slate-600 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-900"
-            >
-              <RotateCcw className="h-3 w-3" />
-              <span className="hidden sm:inline">Reiniciar Base Real</span>
-            </motion.button>
+            {/* Derecha: Controles del Sistema */}
+            <div className="hidden items-center gap-2 xl:flex">
+              <button
+                type="button"
+                onClick={() =>
+                  updateRpgState((prev) => ({ ...prev, soundEnabled: !prev.soundEnabled }))
+                }
+                className={`rounded-xl border px-3 py-1.5 font-mono text-[11px] font-bold transition-colors ${
+                  rpgState.soundEnabled
+                    ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300'
+                    : 'border-slate-800 bg-slate-900 text-slate-500'
+                }`}
+                title="Activar/Desactivar efectos de sonido RPG"
+              >
+                {rpgState.soundEnabled ? '🔊 SFX ON' : '🔇 SFX OFF'}
+              </button>
 
-            <motion.button
-              type="button"
-              whileHover={{ y: -1 }}
-              whileTap={{ scale: 0.96 }}
-              transition={SPRING_TRANSITION}
-              onClick={handleLogout}
-              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 font-mono text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Cerrar Sesión</span>
-            </motion.button>
+              <motion.button
+                type="button"
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.96 }}
+                transition={SPRING_TRANSITION}
+                onClick={() => setResetModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 py-1.5 font-mono text-[11px] font-medium text-slate-300 transition-colors hover:border-orange-500/50 hover:text-orange-300"
+              >
+                <RotateCcw className="h-3 w-3" />
+                <span>Reiniciar Base</span>
+              </motion.button>
+
+              <motion.button
+                type="button"
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.96 }}
+                transition={SPRING_TRANSITION}
+                onClick={handleLogout}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-3 py-1.5 font-mono text-[11px] font-semibold text-slate-300 hover:border-rose-500/50 hover:text-rose-400"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Salir</span>
+              </motion.button>
+            </div>
           </div>
         </header>
 
@@ -1626,7 +2853,7 @@ export default function AdminDashboard() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden border-b border-[#27272A] bg-[#09090B] p-4 text-white md:hidden"
+              className="overflow-hidden border-b border-slate-800 bg-[#07090F] p-4 text-white md:hidden"
             >
               <div className="space-y-1.5">
                 {sidebarNavItems.map((item) => (
@@ -1638,11 +2865,11 @@ export default function AdminDashboard() {
                       setMobileMenuOpen(false);
                     }}
                     className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left font-mono text-xs font-semibold uppercase ${
-                      activeTab === item.id ? 'bg-white/10 text-white' : 'text-zinc-400'
+                      activeTab === item.id ? 'bg-cyan-500/20 text-cyan-300' : 'text-slate-400'
                     }`}
                   >
                     <span>{item.label}</span>
-                    <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px]">{item.badge}</span>
+                    <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px]">{item.badge}</span>
                   </button>
                 ))}
               </div>
@@ -1651,432 +2878,1045 @@ export default function AdminDashboard() {
         </AnimatePresence>
 
         {/* Tab Content con transiciones suaves AnimatePresence */}
-        <main className="flex-1 p-5 md:p-8">
+        <main className="flex-1 p-4 pb-24 sm:p-6 md:p-7 md:pb-10">
           <AnimatePresence mode="wait">
             {/* ================================================================ */}
-            {/* MÓDULO 1: COMMAND CENTER (FOCO SEMANAL & SEMÁFORO DE CUENTAS)     */}
+            {/* TABLERO OPERATIVO RPG / VIDEOJUEGO TÁCTICO (SOLO LEVELING+LINEAR) */}
             {/* ================================================================ */}
             {activeTab === 'command' && (
               <motion.div
-                key="tab-command"
-                initial={{ opacity: 0, scale: 0.98, y: 10 }}
+                key="tab-command-rpg"
+                initial={{ opacity: 0, scale: 0.99, y: 10 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.98, y: -8 }}
+                exit={{ opacity: 0, scale: 0.99, y: -8 }}
                 transition={{ duration: 0.22 }}
-                className="space-y-8"
+                className="space-y-7"
               >
-                {/* Tarjetas KPI Superiores */}
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {/* KPI 1: Sprint */}
-                  <motion.div
-                    whileHover={{ y: -2 }}
-                    transition={SPRING_TRANSITION}
-                    className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm"
-                  >
-                    <div className="flex items-center justify-between font-mono text-xs uppercase tracking-wider text-[#64748B]">
-                      <span>Sprint Semanal</span>
-                      <Sparkles className="h-4 w-4 text-cyan-600" />
-                    </div>
-                    <div className="mt-3 flex items-baseline gap-2">
-                      <span className="text-2xl font-bold tracking-tight text-[#0F172A]">
-                        {completedSprintsCount} de {totalSprintsCount}
+                {/* ============================================================ */}
+                {/* 1. BARRA DE SALUD (HP) DE LOS 4 CLIENTES (ARRIBA)            */}
+                {/* ============================================================ */}
+                <section aria-label="Barra de Salud HP de los 4 Clientes" className="space-y-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-lg border border-cyan-500/40 bg-cyan-500/15 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.3)]">
+                        <Activity className="h-3.5 w-3.5" />
                       </span>
-                      <span className="font-mono text-xs font-semibold text-cyan-700">({sprintProgressPercent}%)</span>
+                      <div>
+                        <h2 className="font-mono text-xs font-extrabold uppercase tracking-wider text-white sm:text-sm">
+                          1. Barra de Salud (HP) de las 4 Cuentas Oficiales
+                        </h2>
+                        <p className="font-mono text-[11px] text-slate-400">
+                          100% HP al publicar · Pierde <strong className="text-orange-400">-25% HP por cada 24h</strong> sin publicación nueva
+                        </p>
+                      </div>
                     </div>
-                    <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${sprintProgressPercent}%` }}
-                        transition={{ duration: 0.6, ease: 'easeOut' }}
-                        className="h-full rounded-full bg-gradient-to-r from-slate-900 to-cyan-600"
-                      />
-                    </div>
-                  </motion.div>
 
-                  {/* KPI 2: Semáforo de Cuentas */}
-                  <motion.div
-                    whileHover={{ y: -2 }}
-                    transition={SPRING_TRANSITION}
-                    className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm"
-                  >
-                    <div className="flex items-center justify-between font-mono text-xs uppercase tracking-wider text-[#64748B]">
-                      <span>Cuentas Oficiales ({zendaClients.length})</span>
-                      <Activity className="h-4 w-4 text-emerald-600" />
-                    </div>
-                    <div className="mt-3 flex items-center gap-3">
-                      <div className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-0.5">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        <span className="font-mono text-xs font-bold text-emerald-800">{accountsInRhythm}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2 py-0.5">
-                        <span className="h-2 w-2 rounded-full bg-amber-500" />
-                        <span className="font-mono text-xs font-bold text-amber-800">{accountsAttention}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2 py-0.5">
-                        <span className="h-2 w-2 rounded-full bg-rose-500" />
-                        <span className="font-mono text-xs font-bold text-rose-800">{accountsDelayed}</span>
-                      </div>
-                    </div>
-                    <p className="mt-3 truncate font-mono text-[11px] text-slate-500">
-                      {zendaClients.map((c) => c.name).join(' · ')}
-                    </p>
-                  </motion.div>
-
-                  {/* KPI 3: Videos Publicados esta Semana */}
-                  <motion.div
-                    whileHover={{ y: -2 }}
-                    transition={SPRING_TRANSITION}
-                    className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm"
-                  >
-                    <div className="flex items-center justify-between font-mono text-xs uppercase tracking-wider text-[#64748B]">
-                      <span>Meta Videos Semana</span>
-                      <Film className="h-4 w-4 text-purple-600" />
-                    </div>
-                    <div className="mt-3 flex items-baseline gap-2">
-                      <span className="text-2xl font-bold tracking-tight text-[#0F172A]">
-                        {zendaClients.reduce((acc, c) => acc + Number(c.videosPublicadosEstaSemana || 0), 0)} /{' '}
-                        {zendaClients.reduce((acc, c) => acc + Number(c.weeklyVideoGoal || 0), 0)}
+                    <div className="flex flex-wrap items-center gap-2 font-mono text-[10px]">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 font-bold text-emerald-300">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                        &gt; 60% HP · Óptimo
                       </span>
-                      <span className="text-xs text-slate-500">publicados</span>
-                    </div>
-                    <p className="mt-3 font-mono text-[11px] text-slate-500">
-                      {scriptsList.length} guiones en taller
-                    </p>
-                  </motion.div>
-
-                  {/* KPI 4: Balance Neto Zenda */}
-                  <motion.div
-                    whileHover={{ y: -2 }}
-                    transition={SPRING_TRANSITION}
-                    className="rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm"
-                  >
-                    <div className="flex items-center justify-between font-mono text-xs uppercase tracking-wider text-[#64748B]">
-                      <span>Balance Neto Zenda</span>
-                      <DollarSign className="h-4 w-4 text-emerald-600" />
-                    </div>
-                    <div className="mt-3 text-2xl font-bold tracking-tight text-[#0F172A]">
-                      S/ {netPEN.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
-                    </div>
-                    <p className="mt-2 font-mono text-[11px] font-semibold text-emerald-700">
-                      Ingresos: S/ {totalIncomePEN.toLocaleString('es-PE', { minimumFractionDigits: 2 })} · Margen {marginPEN}%
-                    </p>
-                  </motion.div>
-                </div>
-
-                {/* SECCIÓN 1: SPRINT DE LA SEMANA */}
-                <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm">
-                  <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-cyan-600" />
-                        <h2 className="text-lg font-bold text-[#0F172A]">Sprint de la Semana</h2>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-500">
-                        Tareas operativas en colección Firestore: <code className="font-semibold text-slate-800">zenda_sprints</code>
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* Filtro dinámico por Cliente */}
-                      <select
-                        value={sprintClientFilter}
-                        onChange={(e) => setSprintClientFilter(e.target.value)}
-                        className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-[11px] font-medium text-slate-700 outline-none focus:border-slate-900"
-                      >
-                        <option value="all">Todas las cuentas</option>
-                        {zendaClients.map((c) => (
-                          <option key={c.id} value={c.name}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-
-                      {/* Filtro por Responsable con layoutId */}
-                      <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1 font-mono text-[11px]">
-                        {[
-                          { id: 'all', label: `Todos (${sprints.length})` },
-                          { id: 'Angel', label: 'Angel' },
-                          { id: 'Marco', label: 'Marco' },
-                          { id: 'pending', label: 'Pendientes' },
-                        ].map((tab) => {
-                          const active = sprintFilter === tab.id;
-                          return (
-                            <button
-                              key={tab.id}
-                              type="button"
-                              onClick={() => setSprintFilter(tab.id)}
-                              className={`relative rounded-lg px-2.5 py-1 transition-colors ${
-                                active ? 'font-bold text-white' : 'text-slate-600 hover:text-slate-900'
-                              }`}
-                            >
-                              {active && (
-                                <motion.div
-                                  layoutId="sprintFilterActivePill"
-                                  transition={SPRING_TRANSITION}
-                                  className="absolute inset-0 rounded-lg bg-[#0F172A]"
-                                />
-                              )}
-                              <span className="relative z-10">{tab.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      <motion.button
-                        type="button"
-                        whileHover={{ y: -2 }}
-                        whileTap={{ scale: 0.96 }}
-                        transition={SPRING_TRANSITION}
-                        onClick={() => setSprintModalOpen(true)}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-[#0F172A] px-4 py-2 font-mono text-xs font-bold tracking-wider text-white shadow-sm hover:bg-slate-800"
-                      >
-                        <Plus className="h-4 w-4" />
-                        + NUEVA TAREA
-                      </motion.button>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 font-bold text-amber-300">
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                        30–60% HP · Desgaste
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/50 bg-rose-500/15 px-2.5 py-0.5 font-bold text-rose-300">
+                        <span className="h-1.5 w-1.5 animate-ping rounded-full bg-rose-500" />
+                        &lt; 30% HP · Cuenta en Peligro
+                      </span>
                     </div>
                   </div>
 
-                  {/* Lista de tareas */}
-                  <div className="mt-4 divide-y divide-slate-100">
-                    {filteredSprints.length === 0 ? (
-                      <div className="py-10 text-center font-mono text-xs text-slate-400">
-                        No hay tareas registradas en el sprint actual. Pulsa &ldquo;+ NUEVA TAREA&rdquo; para comenzar.
-                      </div>
-                    ) : (
-                      filteredSprints.map((sprint) => {
-                        const deadlineInfo = getDeadlineStatus(sprint.deadline, todayDateStr);
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    {accountHealthCards.map((item) => {
+                      const {
+                        client,
+                        hoursSincePublish,
+                        hpPercent,
+                        statusKey,
+                        statusLabel,
+                        publishedPieceCount,
+                        weeklyGoal,
+                        isHealedFlashing,
+                      } = item;
 
-                        return (
-                          <motion.div
-                            key={sprint.id}
-                            layout
-                            className={`group flex flex-col gap-3 py-3.5 transition-colors sm:flex-row sm:items-center sm:justify-between ${
-                              sprint.completed ? 'opacity-50' : 'hover:bg-slate-50/70'
-                            }`}
-                          >
-                            <div className="flex items-start gap-3">
-                              <motion.button
-                                type="button"
-                                whileTap={{ scale: 0.85 }}
-                                animate={{ scale: sprint.completed ? [1, 1.25, 1] : 1 }}
-                                transition={{ duration: 0.3 }}
-                                onClick={() => handleToggleSprint(sprint.id, sprint.completed)}
-                                className="mt-0.5 rounded-full text-slate-400 transition-colors hover:text-slate-900"
-                                title={sprint.completed ? 'Marcar como pendiente' : 'Marcar como completada'}
-                              >
-                                {sprint.completed ? (
-                                  <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                                ) : (
-                                  <Circle className="h-5 w-5 text-slate-300 group-hover:text-slate-700" />
-                                )}
-                              </motion.button>
+                      const isGreen = statusKey === 'green';
+                      const isAmber = statusKey === 'amber';
+                      const isCriticalRed = statusKey === 'red';
 
-                              <div>
-                                <p className={`text-sm ${sprint.completed ? 'line-through text-slate-400 font-normal' : 'font-medium text-slate-900'}`}>
-                                  {sprint.title}
-                                </p>
-                                <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                                  {sprint.client && (
-                                    <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-700">
-                                      {sprint.client}
-                                    </span>
-                                  )}
+                      const cardStyleClass = isHealedFlashing
+                        ? 'border-emerald-400 bg-[#0D1F1D] shadow-[0_0_30px_rgba(16,185,129,0.45)]'
+                        : isGreen
+                        ? 'border-emerald-500/35 bg-[#0C1220] hover:border-emerald-400/60 shadow-[0_0_18px_rgba(16,185,129,0.08)]'
+                        : isAmber
+                        ? 'border-amber-500/45 bg-[#121320] hover:border-amber-400/70 shadow-[0_0_18px_rgba(245,158,11,0.12)]'
+                        : 'border-rose-500/70 bg-[#190D16] hover:border-rose-400 shadow-[0_0_24px_rgba(244,63,94,0.28)]';
 
-                                  {sprint.assignee === 'Angel' ? (
-                                    <span className="rounded-full bg-zinc-800 px-2 py-0.5 font-mono text-[10px] font-semibold text-white">
-                                      @Angel
-                                    </span>
-                                  ) : (
-                                    <span className="rounded-full border border-cyan-800/60 bg-[#0B2545] px-2 py-0.5 font-mono text-[10px] font-semibold text-cyan-200">
-                                      @Marco
-                                    </span>
-                                  )}
-
-                                  <span className={`rounded-full border px-2 py-0.5 font-mono text-[10px] ${getPriorityBadge(sprint.priority)}`}>
-                                    {sprint.priority}
-                                  </span>
-
-                                  <span className={`flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px] ${deadlineInfo.colorClass}`}>
-                                    <Clock className="h-3 w-3" />
-                                    <span>{sprint.deadline} · {deadlineInfo.label}</span>
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center justify-end gap-2 pl-8 sm:pl-0">
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteSprint(sprint.id)}
-                                className="rounded-lg p-1.5 text-slate-400 opacity-0 transition-all hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100"
-                                title="Eliminar tarea"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </motion.div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                {/* SECCIÓN 2: SEMÁFORO DE CUENTAS OFICIALES */}
-                <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm">
-                  <div className="flex flex-col gap-2 border-b border-slate-100 pb-5 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        <h2 className="text-lg font-bold text-[#0F172A]">Semáforo de Cuentas Oficiales</h2>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-500">
-                        Haz clic en cualquier cuenta para abrir su Vista 360° y editar retainer, abonos, guiones y avances en vivo.
-                      </p>
-                    </div>
-
-                    <motion.button
-                      type="button"
-                      whileHover={{ y: -2 }}
-                      whileTap={{ scale: 0.96 }}
-                      transition={SPRING_TRANSITION}
-                      onClick={() => {
-                        setSelectedClient360Id(null);
-                        setActiveTab('clients');
-                      }}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 font-mono text-xs font-semibold text-slate-800 hover:bg-slate-100"
-                    >
-                      <Building2 className="h-3.5 w-3.5" />
-                      Ver Portafolio 360°
-                    </motion.button>
-                  </div>
-
-                  <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-3">
-                    {zendaClients.map((client) => {
-                      const health = client.health || 'En ritmo';
-                      const retainer = Number(client.monthlyRetainer || 0);
-                      const paid = Number(client.currentMonthPaid || 0);
-                      const pending = Math.max(0, retainer - paid);
+                      const hpBarColorClass = isGreen
+                        ? 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-cyan-400 shadow-[0_0_12px_rgba(16,185,129,0.65)]'
+                        : isAmber
+                        ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-yellow-400 shadow-[0_0_12px_rgba(245,158,11,0.6)]'
+                        : 'bg-gradient-to-r from-rose-600 via-red-500 to-orange-500 shadow-[0_0_14px_rgba(244,63,94,0.8)]';
 
                       return (
                         <motion.div
                           key={client.id}
-                          whileHover={{ y: -2 }}
+                          whileHover={{ y: -3 }}
                           transition={SPRING_TRANSITION}
-                          className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:border-slate-300 hover:shadow-md"
+                          className={`relative flex flex-col justify-between overflow-hidden rounded-2xl border p-4 transition-all ${cardStyleClass}`}
                         >
+                          {/* Efecto visual de Curación 100% HP al publicar */}
+                          <AnimatePresence>
+                            {isHealedFlashing && (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-emerald-500/20 backdrop-blur-[1px]"
+                              >
+                                <motion.div
+                                  initial={{ y: 12, opacity: 0 }}
+                                  animate={{ y: -6, opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                  className="rounded-xl border border-emerald-300 bg-emerald-950/95 px-3.5 py-2 font-mono text-xs font-extrabold text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.8)]"
+                                >
+                                  💚 +100% HP RESTAURADO
+                                </motion.div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+
                           <div>
+                            {/* Cabecera del Cliente + Alerta Crítica */}
                             <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2.5">
+                              <div className="flex items-center gap-2.5 min-w-0">
                                 <span
-                                  className="h-3.5 w-3.5 shrink-0 rounded-full border border-slate-300 shadow-sm"
-                                  style={{ backgroundColor: client.brandColors?.[0] || '#0F172A' }}
+                                  className="h-3.5 w-3.5 shrink-0 rounded-full ring-2 ring-white/20"
+                                  style={{ backgroundColor: client.brandColors?.[0] || '#06B6D4' }}
                                 />
-                                <div>
-                                  <h3 className="text-base font-bold text-slate-900 leading-tight">
+                                <div className="truncate">
+                                  <h3 className="truncate text-sm font-extrabold tracking-tight text-white">
                                     {client.name}
                                   </h3>
-                                  <p className="mt-0.5 text-[11px] text-slate-500 line-clamp-1">{client.category}</p>
+                                  <p className="truncate font-mono text-[10px] text-slate-400">
+                                    {client.category}
+                                  </p>
                                 </div>
                               </div>
 
-                              <select
-                                value={health}
-                                onChange={(e) => handleUpdateClientField(client.id, { health: e.target.value })}
-                                className={`rounded-full border px-2.5 py-1 font-mono text-[11px] font-semibold outline-none cursor-pointer ${getHealthBadge(
-                                  health,
-                                )}`}
+                              <span
+                                className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase ${
+                                  isGreen
+                                    ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                                    : isAmber
+                                    ? 'border-amber-500/40 bg-amber-500/15 text-amber-300'
+                                    : 'animate-pulse border-rose-500 bg-rose-500/25 text-rose-200'
+                                }`}
                               >
-                                <option value="En ritmo">🟢 En ritmo</option>
-                                <option value="Requiere atención">🟡 Requiere atención</option>
-                                <option value="Demorado">🔴 Demorado</option>
-                              </select>
+                                {isCriticalRed && <span>⚠️</span>}
+                                <span>{statusLabel}</span>
+                              </span>
                             </div>
 
-                            <p className="mt-3 text-xs text-slate-600 line-clamp-2 leading-relaxed">
-                              {client.story}
-                            </p>
-
-                            {/* Barras animadas de avance técnico */}
-                            <div className="mt-4 grid grid-cols-2 gap-2.5 rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs">
-                              <div>
-                                <div className="flex justify-between font-mono text-[10px] text-slate-500">
-                                  <span>Web</span>
-                                  <span className="font-bold text-slate-900">{client.webProgress ?? 0}%</span>
+                            {/* Medidor de HP y Tiempo sin Publicar */}
+                            <div className="mt-4 rounded-xl border border-slate-800/90 bg-[#070A12] p-3">
+                              <div className="flex items-baseline justify-between">
+                                <div className="flex items-baseline gap-1.5">
+                                  <span className="font-mono text-[10px] font-bold uppercase text-slate-400">
+                                    HP
+                                  </span>
+                                  <span
+                                    className={`font-mono text-2xl font-black tracking-tight ${
+                                      isGreen
+                                        ? 'text-emerald-400'
+                                        : isAmber
+                                        ? 'text-amber-400'
+                                        : 'text-rose-400'
+                                    }`}
+                                  >
+                                    {hpPercent}%
+                                  </span>
+                                  <span className="font-mono text-[10px] text-slate-500">
+                                    / 100%
+                                  </span>
                                 </div>
-                                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-                                  <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${client.webProgress ?? 0}%` }}
-                                    transition={{ duration: 0.6, ease: 'easeOut' }}
-                                    className="h-full rounded-full bg-slate-900"
-                                  />
+
+                                <span className="font-mono text-[11px] font-semibold text-slate-300">
+                                  ⏱ {hoursSincePublish}h sin pub.
+                                </span>
+                              </div>
+
+                              {/* Barra de HP Animada */}
+                              <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-slate-900 p-0.5 ring-1 ring-slate-800">
+                                <motion.div
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${hpPercent}%` }}
+                                  transition={{ duration: 0.55, ease: 'easeOut' }}
+                                  className={`h-full rounded-full ${hpBarColorClass}`}
+                                />
+                              </div>
+
+                              <div className="mt-2 flex items-center justify-between font-mono text-[10px] text-slate-400">
+                                <span>
+                                  Reels semana:{' '}
+                                  <strong className="text-white">
+                                    {publishedPieceCount}/{weeklyGoal}
+                                  </strong>
+                                </span>
+                                <div className="flex items-center gap-1" title="Simular horas transcurridas para probar desgaste de HP">
+                                  {[
+                                    { h: 0, label: '0h' },
+                                    { h: 24, label: '24h' },
+                                    { h: 48, label: '48h' },
+                                    { h: 76, label: '76h' },
+                                  ].map((preset) => (
+                                    <button
+                                      key={preset.h}
+                                      type="button"
+                                      onClick={() =>
+                                        handleSetClientSimulatedHours(client.id, preset.h)
+                                      }
+                                      className={`rounded px-1.5 py-0.5 text-[9px] font-bold transition-colors ${
+                                        hoursSincePublish === preset.h
+                                          ? 'bg-cyan-500/30 text-cyan-200 ring-1 ring-cyan-400/50'
+                                          : 'bg-slate-900 text-slate-500 hover:text-slate-300'
+                                      }`}
+                                    >
+                                      {preset.label}
+                                    </button>
+                                  ))}
                                 </div>
                               </div>
-                              <div>
-                                <div className="flex justify-between font-mono text-[10px] text-slate-500">
-                                  <span>Bots IA</span>
-                                  <span className="font-bold text-cyan-700">{client.automationProgress ?? 0}%</span>
-                                </div>
-                                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-                                  <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${client.automationProgress ?? 0}%` }}
-                                    transition={{ duration: 0.6, ease: 'easeOut' }}
-                                    className="h-full rounded-full bg-cyan-600"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Estado financiero y videos */}
-                            <div className="mt-3 flex items-center justify-between rounded-xl border border-slate-100 bg-white px-3 py-2 text-xs">
-                              <span className="font-mono text-[11px] text-slate-500">
-                                Retainer: S/ {retainer.toFixed(0)} ·{' '}
-                                {pending === 0 ? (
-                                  <span className="font-bold text-emerald-700">Al día</span>
-                                ) : (
-                                  <span className="font-bold text-amber-700">Resta S/ {pending.toFixed(0)}</span>
-                                )}
-                              </span>
-                              <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-800">
-                                Videos: {client.videosPublicadosEstaSemana ?? 0}/{client.weeklyVideoGoal ?? 3}
-                              </span>
                             </div>
                           </div>
 
-                          <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3">
-                            <span className="font-mono text-[11px] text-slate-500">
-                              Lead: <span className="font-bold text-slate-900">{client.leadOwner || 'Angel'}</span>
-                            </span>
+                          {/* Botón de 1 Clic: Publicar pieza -> Restaura HP al 100% con efecto visual */}
+                          <div className="mt-3.5 flex items-center gap-2">
+                            <motion.button
+                              type="button"
+                              whileHover={{ y: -1 }}
+                              whileTap={{ scale: 0.95 }}
+                              transition={SPRING_TRANSITION}
+                              onClick={() => handleQuickMarkAccountPublishedNow(client)}
+                              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 py-2 font-mono text-[11px] font-extrabold transition-all ${
+                                isCriticalRed
+                                  ? 'border-rose-400 bg-gradient-to-r from-rose-600 to-orange-600 text-white shadow-[0_0_15px_rgba(244,63,94,0.45)] hover:brightness-110'
+                                  : 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500 hover:text-slate-950'
+                              }`}
+                            >
+                              <Zap className="h-3.5 w-3.5" />
+                              <span>Publicar Reel (+100% HP)</span>
+                            </motion.button>
 
-                            <div className="flex items-center gap-2">
-                              <motion.button
-                                type="button"
-                                whileHover={{ y: -1 }}
-                                whileTap={{ scale: 0.96 }}
-                                transition={SPRING_TRANSITION}
-                                onClick={() => handleOpenClient360(client.id, 'scripts')}
-                                className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-[11px] font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-900"
-                              >
-                                Guiones
-                              </motion.button>
-                              <motion.button
-                                type="button"
-                                whileHover={{ y: -1 }}
-                                whileTap={{ scale: 0.96 }}
-                                transition={SPRING_TRANSITION}
-                                onClick={() => handleOpenClient360(client.id, 'finances')}
-                                className="inline-flex items-center gap-1 rounded-lg bg-[#0F172A] px-3 py-1.5 font-mono text-[11px] font-semibold text-white hover:bg-slate-800"
-                              >
-                                Vista 360°
-                              </motion.button>
-                            </div>
+                            <motion.button
+                              type="button"
+                              whileTap={{ scale: 0.95 }}
+                              transition={SPRING_TRANSITION}
+                              onClick={() => handleOpenClient360(client.id, 'scripts')}
+                              className="rounded-xl border border-slate-800 bg-slate-900/90 px-2.5 py-2 font-mono text-[11px] font-bold text-slate-300 hover:border-slate-600 hover:text-white"
+                              title="Abrir Taller de Guiones y Vista 360°"
+                            >
+                              360°
+                            </motion.button>
                           </div>
                         </motion.div>
                       );
                     })}
                   </div>
-                </div>
+                </section>
+
+                {/* ============================================================ */}
+                {/* 2. PERFILES DE JUGADOR & 3. TABLERO DE 'QUESTS DEL DÍA'      */}
+                {/* ============================================================ */}
+                <section aria-label="Perfiles de Jugador y Quests del Día" className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-lg border border-orange-500/40 bg-orange-500/15 text-orange-400 shadow-[0_0_12px_rgba(249,115,22,0.3)]">
+                        <Flame className="h-3.5 w-3.5" />
+                      </span>
+                      <div>
+                        <h2 className="font-mono text-xs font-extrabold uppercase tracking-wider text-white sm:text-sm">
+                          2 &amp; 3. Perfiles de Jugador (Kevin vs Marco) &amp; Tablero de Quests del Día
+                        </h2>
+                        <p className="font-mono text-[11px] text-slate-400">
+                          Check-in 8:30 AM (+50 XP antes de las 9:00 AM) · Máximo 3 Quests diarias por jugador (Pendiente → En Curso → Completado)
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Controles del Sistema: Simulador < 9:00 AM para probar el Check-in 8:30 AM + Modal */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSimulateBefore9AM((prev) => !prev)}
+                        className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 font-mono text-[10px] font-bold transition-all ${
+                          isBefore9AMWindow
+                            ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                            : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700 hover:text-white'
+                        }`}
+                        title="Permite probar el botón Check-in 8:30 AM (+50 XP) aunque sean más de las 9:00 AM"
+                      >
+                        <Clock className="h-3.5 w-3.5" />
+                        <span>
+                          {currentLocalHour < 9
+                            ? 'Ventana < 9:00 AM Activa'
+                            : simulateBefore9AM
+                            ? '🔓 Simulación < 9:00 AM: ON'
+                            : `🔒 Hora actual ${currentLocalHour}:00 (Simular <9AM)`}
+                        </span>
+                      </button>
+
+                      <motion.button
+                        type="button"
+                        whileHover={{ y: -1 }}
+                        whileTap={{ scale: 0.96 }}
+                        transition={SPRING_TRANSITION}
+                        onClick={() => setSprintModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-3 py-1.5 font-mono text-[11px] font-bold text-cyan-300 hover:bg-cyan-500 hover:text-slate-950"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        + Quest Detallada
+                      </motion.button>
+                    </div>
+                  </div>
+
+                  {/* Dos Paneles Lado a Lado: Kevin (Arquitecto IA) vs Marco (Director de Campo) */}
+                  <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    {[
+                      {
+                        player: 'Kevin',
+                        classTitle: 'Kevin · Arquitecto IA',
+                        rankTag: 'SHADOW AI ARCHITECT',
+                        avatarText: 'KV',
+                        themeAccent: 'cyan',
+                        panelBorder: 'border-cyan-500/35 bg-[#0A101D]',
+                        avatarStyle:
+                          'border-cyan-400 bg-gradient-to-br from-cyan-500 to-blue-700 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.5)]',
+                        xpBarStyle:
+                          'bg-gradient-to-r from-cyan-500 via-sky-400 to-emerald-400 shadow-[0_0_12px_rgba(6,182,212,0.65)]',
+                        level: kevinLevel,
+                        totalXP: kevinTotalXP,
+                        levelXP: kevinLevelXP,
+                        levelPercent: kevinLevelPercent,
+                        earlyStreak: Number(rpgState.kevinEarlyStreak || 0),
+                        checkedInToday: kevinCheckedInToday,
+                        missionsData: kevinMissionsData,
+                        quickForm: quickMissionKevin,
+                        setQuickForm: setQuickMissionKevin,
+                      },
+                      {
+                        player: 'Marco',
+                        classTitle: 'Marco · Director de Campo',
+                        rankTag: 'VANGUARD FIELD DIRECTOR',
+                        avatarText: 'MC',
+                        themeAccent: 'orange',
+                        panelBorder: 'border-orange-500/35 bg-[#100E1A]',
+                        avatarStyle:
+                          'border-orange-400 bg-gradient-to-br from-orange-500 to-amber-600 text-slate-950 shadow-[0_0_20px_rgba(249,115,22,0.5)]',
+                        xpBarStyle:
+                          'bg-gradient-to-r from-orange-500 via-amber-400 to-yellow-300 shadow-[0_0_12px_rgba(249,115,22,0.65)]',
+                        level: marcoLevel,
+                        totalXP: marcoTotalXP,
+                        levelXP: marcoLevelXP,
+                        levelPercent: marcoLevelPercent,
+                        earlyStreak: Number(rpgState.marcoEarlyStreak || 0),
+                        checkedInToday: marcoCheckedInToday,
+                        missionsData: marcoMissionsData,
+                        quickForm: quickMissionMarco,
+                        setQuickForm: setQuickMissionMarco,
+                      },
+                    ].map((hunter) => {
+                      const doneToday = Math.min(3, hunter.missionsData.completedTodayCount);
+                      const all3Cleared = doneToday >= 3;
+
+                      return (
+                        <div
+                          key={hunter.player}
+                          className={`flex flex-col justify-between rounded-2xl border p-4 sm:p-5 shadow-xl ${hunter.panelBorder}`}
+                        >
+                          <div>
+                            {/* ================================================ */}
+                            {/* PANEL SUPERIOR: PERFIL DE JUGADOR RPG            */}
+                            {/* ================================================ */}
+                            <div className="rounded-2xl border border-slate-800/90 bg-[#070A12]/90 p-4">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="flex items-center gap-3.5">
+                                  {/* Avatar Táctico con Nivel */}
+                                  <div className="relative">
+                                    <div
+                                      className={`flex h-14 w-14 items-center justify-center rounded-2xl border-2 font-mono text-lg font-black ${hunter.avatarStyle}`}
+                                    >
+                                      {hunter.avatarText}
+                                    </div>
+                                    <span className="absolute -bottom-1.5 -right-1.5 rounded-lg border border-slate-700 bg-slate-950 px-1.5 py-0.5 font-mono text-[10px] font-black text-white shadow">
+                                      LVL {hunter.level}
+                                    </span>
+                                  </div>
+
+                                  <div>
+                                    <span
+                                      className={`inline-block rounded border px-1.5 py-0.5 font-mono text-[9px] font-extrabold uppercase tracking-widest ${
+                                        hunter.themeAccent === 'cyan'
+                                          ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300'
+                                          : 'border-orange-500/40 bg-orange-500/15 text-orange-300'
+                                      }`}
+                                    >
+                                      {hunter.rankTag}
+                                    </span>
+                                    <h3 className="mt-1 text-lg font-extrabold tracking-tight text-white">
+                                      {hunter.classTitle}
+                                    </h3>
+                                    <p className="font-mono text-[11px] text-slate-400">
+                                      XP Total:{' '}
+                                      <strong className="text-white">
+                                        {hunter.totalXP.toLocaleString()} XP
+                                      </strong>
+                                    </p>
+                                  </div>
+                                </div>
+
+                                {/* Racha de Días Despertando Temprano */}
+                                <div className="flex flex-col items-end">
+                                  <div className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-1 font-mono text-xs font-extrabold text-amber-300">
+                                    <Flame className="h-4 w-4 text-orange-400" />
+                                    <span>{hunter.earlyStreak} días 8:30 AM</span>
+                                  </div>
+                                  <span className="mt-1 font-mono text-[10px] text-slate-500">
+                                    Racha Despertando Temprano
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Barra de XP del Jugador */}
+                              <div className="mt-4 space-y-1.5">
+                                <div className="flex items-center justify-between font-mono text-[11px]">
+                                  <span className="text-slate-400">
+                                    Progreso a <strong className="text-white">LVL {hunter.level + 1}</strong>
+                                  </span>
+                                  <span
+                                    className={`font-bold ${
+                                      hunter.themeAccent === 'cyan'
+                                        ? 'text-cyan-300'
+                                        : 'text-orange-300'
+                                    }`}
+                                  >
+                                    {hunter.levelXP} / {XP_PER_LEVEL} XP ({hunter.levelPercent}%)
+                                  </span>
+                                </div>
+                                <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-900 p-0.5 ring-1 ring-slate-800">
+                                  <motion.div
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${hunter.levelPercent}%` }}
+                                    transition={{ duration: 0.55, ease: 'easeOut' }}
+                                    className={`h-full rounded-full ${hunter.xpBarStyle}`}
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Botón de 'Check-in 8:30 AM +50 XP' (Solo habilitado antes de las 9:00 AM) */}
+                              <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/80 pt-3">
+                                <span className="font-mono text-[10px] text-slate-400">
+                                  🌅 Bono Matutino (Antes de 9:00 AM):
+                                </span>
+
+                                <motion.button
+                                  type="button"
+                                  disabled={!isBefore9AMWindow || hunter.checkedInToday}
+                                  whileHover={
+                                    isBefore9AMWindow && !hunter.checkedInToday ? { y: -1 } : {}
+                                  }
+                                  whileTap={
+                                    isBefore9AMWindow && !hunter.checkedInToday
+                                      ? { scale: 0.95 }
+                                      : {}
+                                  }
+                                  onClick={() => handleMorningCheckIn(hunter.player)}
+                                  className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 font-mono text-[11px] font-extrabold transition-all ${
+                                    hunter.checkedInToday
+                                      ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300'
+                                      : isBefore9AMWindow
+                                      ? 'border-amber-400 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.45)] hover:brightness-110'
+                                      : 'cursor-not-allowed border-slate-800 bg-slate-900/70 text-slate-500'
+                                  }`}
+                                >
+                                  <Zap className="h-3.5 w-3.5" />
+                                  <span>
+                                    {hunter.checkedInToday
+                                      ? '✓ Check-in 8:30 AM Reclamado (+50 XP)'
+                                      : isBefore9AMWindow
+                                      ? 'Check-in 8:30 AM (+50 XP)'
+                                      : '🔒 Check-in 8:30 AM +50 XP (< 9:00 AM)'}
+                                  </span>
+                                </motion.button>
+                              </div>
+                            </div>
+
+                            {/* ================================================ */}
+                            {/* 3. TABLERO DE 'QUESTS DEL DÍA' (MÁX 3 VISIBLES)  */}
+                            {/* ================================================ */}
+                            <div className="mt-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-xs font-extrabold uppercase tracking-wider text-white">
+                                    ⚔️ Quests del Día · {hunter.player}
+                                  </span>
+                                  <span className="rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-300">
+                                    Máx 3 visibles ({hunter.missionsData.top3.length}/3)
+                                  </span>
+                                </div>
+
+                                <span
+                                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-mono text-[11px] font-extrabold ${
+                                    all3Cleared
+                                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.35)]'
+                                      : 'border-slate-700 bg-slate-900 text-slate-300'
+                                  }`}
+                                >
+                                  {all3Cleared && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+                                  {doneToday}/3 Completadas
+                                </span>
+                              </div>
+
+                              {/* Creador Rápido de Quest con Selector de Dificultad (+100 / +150 / +200 XP) */}
+                              <form
+                                onSubmit={(e) => {
+                                  e.preventDefault();
+                                  if (!hunter.quickForm.title.trim()) return;
+                                  handleQuickCreateMissionInline({
+                                    title: hunter.quickForm.title,
+                                    client: hunter.quickForm.client,
+                                    assignee: hunter.player,
+                                    questDifficulty: hunter.quickForm.questDifficulty,
+                                    priority: 'Urgente',
+                                    deadline: todayDateStr,
+                                    isTodayPinned: true,
+                                  });
+                                  hunter.setQuickForm({ ...hunter.quickForm, title: '' });
+                                }}
+                                className="mt-3 flex flex-col gap-2 rounded-xl border border-slate-800 bg-[#070A12] p-2.5"
+                              >
+                                <div className="grid grid-cols-2 gap-2">
+                                  <select
+                                    value={hunter.quickForm.client}
+                                    onChange={(e) =>
+                                      hunter.setQuickForm({
+                                        ...hunter.quickForm,
+                                        client: e.target.value,
+                                      })
+                                    }
+                                    className="rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 font-mono text-[11px] font-bold text-white outline-none focus:border-cyan-400"
+                                  >
+                                    {zendaClients.map((c) => (
+                                      <option key={c.id} value={c.name}>
+                                        {c.name}
+                                      </option>
+                                    ))}
+                                  </select>
+
+                                  <select
+                                    value={hunter.quickForm.questDifficulty}
+                                    onChange={(e) =>
+                                      hunter.setQuickForm({
+                                        ...hunter.quickForm,
+                                        questDifficulty: e.target.value,
+                                      })
+                                    }
+                                    className="rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 font-mono text-[11px] font-bold text-orange-300 outline-none focus:border-orange-400"
+                                  >
+                                    {QUEST_DIFFICULTIES.map((d) => (
+                                      <option key={d.id} value={d.id}>
+                                        {d.badgeLabel}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <div className="flex gap-2">
+                                  <input
+                                    type="text"
+                                    value={hunter.quickForm.title}
+                                    onChange={(e) =>
+                                      hunter.setQuickForm({
+                                        ...hunter.quickForm,
+                                        title: e.target.value,
+                                      })
+                                    }
+                                    placeholder={`+ Nueva Quest para ${hunter.player}...`}
+                                    className="flex-1 rounded-lg border border-slate-800 bg-slate-900/90 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-400"
+                                  />
+                                  <motion.button
+                                    type="submit"
+                                    whileTap={{ scale: 0.95 }}
+                                    transition={SPRING_TRANSITION}
+                                    className={`inline-flex items-center justify-center gap-1 rounded-lg px-3.5 py-2 font-mono text-[11px] font-extrabold text-slate-950 ${
+                                      hunter.themeAccent === 'cyan'
+                                        ? 'bg-cyan-400 hover:bg-cyan-300'
+                                        : 'bg-orange-400 hover:bg-orange-300'
+                                    }`}
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                    <span>Crear</span>
+                                  </motion.button>
+                                </div>
+                              </form>
+
+                              {/* Cartas de Misión RPG (Máximo 3 visibles por jugador) */}
+                              <div className="mt-3.5 space-y-3">
+                                {hunter.missionsData.top3.length === 0 ? (
+                                  <div className="rounded-2xl border border-dashed border-slate-800 bg-[#070A12]/60 p-6 text-center">
+                                    <p className="font-mono text-xs font-bold text-slate-400">
+                                      [SISTEMA: 0/3 QUESTS ASIGNADAS A {hunter.player.toUpperCase()}]
+                                    </p>
+                                    <p className="mt-1 font-mono text-[11px] text-slate-500">
+                                      Crea una Quest arriba (+100 XP Guion, +150 XP Grabación o +200 XP Reel Publicado).
+                                    </p>
+                                  </div>
+                                ) : (
+                                  hunter.missionsData.top3.map((quest, qIdx) => {
+                                    const rpgStatus = getQuestRpgStatus(quest);
+                                    const diffInfo = getQuestDifficultyInfo(quest);
+                                    const isPending = rpgStatus === 'Pendiente';
+                                    const isInCourse = rpgStatus === 'En Curso';
+                                    const isCompleted = rpgStatus === 'Completado';
+
+                                    const matchingClient = zendaClients.find(
+                                      (c) =>
+                                        normalizeAccountKey(c.name) ===
+                                        normalizeAccountKey(quest.client),
+                                    );
+                                    const brandDotColor =
+                                      matchingClient?.brandColors?.[0] || '#06B6D4';
+
+                                    const cardBorder = isCompleted
+                                      ? 'border-emerald-500/60 bg-gradient-to-br from-emerald-950/40 via-[#081217] to-[#070A12] shadow-[0_0_20px_rgba(16,185,129,0.15)]'
+                                      : isInCourse
+                                      ? 'border-orange-500/70 bg-gradient-to-br from-orange-950/35 via-[#110F1D] to-[#070A12] shadow-[0_0_20px_rgba(249,115,22,0.2)]'
+                                      : 'border-slate-800 bg-[#080C16] hover:border-cyan-500/40';
+
+                                    const actionBtnText = isPending
+                                      ? '⚔️ 1-Clic: Iniciar Quest (En Curso) →'
+                                      : isInCourse
+                                      ? `⚡ 1-Clic: Completar Quest (+${diffInfo.xp} XP) ✓`
+                                      : `✅ Quest Completada (+${diffInfo.xp} XP Reclamados)`;
+
+                                    return (
+                                      <motion.div
+                                        key={quest.id}
+                                        layout
+                                        initial={{ opacity: 0, y: 6 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        className={`relative rounded-2xl border p-4 transition-all ${cardBorder}`}
+                                      >
+                                        {/* Fila Superior de la Carta de Misión: Cliente + Dificultad XP + Acciones */}
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] font-black text-cyan-400 ring-1 ring-slate-700">
+                                              Q{qIdx + 1}
+                                            </span>
+
+                                            {/* Etiqueta de Cliente */}
+                                            <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/90 px-2.5 py-0.5 font-mono text-[11px] font-bold text-white">
+                                              <span
+                                                className="h-2 w-2 rounded-full"
+                                                style={{ backgroundColor: brandDotColor }}
+                                              />
+                                              {quest.client || 'Zenda Agency'}
+                                            </span>
+
+                                            {/* Selector táctil de Dificultad (+100 XP Guion | +150 XP Grabación | +200 XP Reel Publicado) */}
+                                            <select
+                                              value={diffInfo.id}
+                                              onChange={(e) =>
+                                                handleChangeQuestDifficulty(quest, e.target.value)
+                                              }
+                                              className={`cursor-pointer rounded-lg border px-2 py-0.5 font-mono text-[10px] font-extrabold outline-none ${diffInfo.colorClass}`}
+                                              title="Cambiar dificultad y recompensa de XP de esta Quest"
+                                            >
+                                              {QUEST_DIFFICULTIES.map((d) => (
+                                                <option
+                                                  key={d.id}
+                                                  value={d.id}
+                                                  className="bg-slate-950 text-white"
+                                                >
+                                                  {d.badgeLabel}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+
+                                          <div className="flex items-center gap-1">
+                                            <button
+                                              type="button"
+                                              onClick={() => handleSwitchMissionAssignee(quest)}
+                                              className="rounded-lg border border-slate-800 bg-slate-900 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-400 hover:border-slate-600 hover:text-white"
+                                              title="Transferir Quest entre Kevin y Marco"
+                                            >
+                                              @{normalizeAssignee(quest.assignee)}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleDeleteSprint(quest.id)}
+                                              className="rounded-lg p-1 text-slate-500 hover:bg-rose-500/15 hover:text-rose-400"
+                                              title="Eliminar Quest"
+                                            >
+                                              <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
+                                          </div>
+                                        </div>
+
+                                        {/* Título de la Misión */}
+                                        <p
+                                          className={`mt-2.5 text-sm font-extrabold leading-snug ${
+                                            isCompleted
+                                              ? 'line-through text-emerald-300/70'
+                                              : 'text-white'
+                                          }`}
+                                        >
+                                          {quest.title}
+                                        </p>
+
+                                        {/* Píldoras de Estado RPG: Pendiente → En Curso → Completado */}
+                                        <div className="mt-3 grid grid-cols-3 gap-1.5 rounded-xl border border-slate-800/90 bg-[#05080F] p-1">
+                                          {QUEST_STATES.map((st, sIdx) => {
+                                            const currentIdx = QUEST_STATES.indexOf(rpgStatus);
+                                            const isCurrent = rpgStatus === st;
+                                            const isPassed = sIdx < currentIdx;
+
+                                            return (
+                                              <button
+                                                key={st}
+                                                type="button"
+                                                onClick={() =>
+                                                  handleAdvanceQuestRpgState(quest, st)
+                                                }
+                                                className={`rounded-lg py-1 font-mono text-[10px] font-extrabold transition-all ${
+                                                  isCurrent
+                                                    ? st === 'Completado'
+                                                      ? 'bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.5)]'
+                                                      : st === 'En Curso'
+                                                      ? 'bg-orange-500 text-slate-950 shadow-[0_0_10px_rgba(249,115,22,0.5)]'
+                                                      : 'bg-cyan-500/25 text-cyan-300 ring-1 ring-cyan-400/40'
+                                                    : isPassed
+                                                    ? 'bg-emerald-500/10 text-emerald-400'
+                                                    : 'text-slate-500 hover:text-slate-300'
+                                                }`}
+                                              >
+                                                {isPassed ? `✓ ${st}` : st}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+
+                                        {/* Botón de 1 Clic para Avanzar Estado (Pendiente → En Curso → Completado) */}
+                                        <motion.button
+                                          type="button"
+                                          whileHover={{ y: -1 }}
+                                          whileTap={{ scale: 0.96 }}
+                                          animate={{
+                                            scale: isCompleted ? [1, 1.04, 1] : 1,
+                                          }}
+                                          transition={SPRING_TRANSITION}
+                                          onClick={() => handleAdvanceQuestRpgState(quest)}
+                                          className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-mono text-xs font-black transition-all ${
+                                            isPending
+                                              ? 'border border-cyan-400/50 bg-cyan-500/20 text-cyan-200 hover:bg-cyan-400 hover:text-slate-950'
+                                              : isInCourse
+                                              ? 'bg-gradient-to-r from-orange-500 via-amber-500 to-emerald-500 text-slate-950 shadow-[0_0_18px_rgba(249,115,22,0.45)] hover:brightness-110'
+                                              : 'border border-emerald-500/50 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+                                          }`}
+                                        >
+                                          <span>{actionBtnText}</span>
+                                        </motion.button>
+                                      </motion.div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Pie del Panel del Jugador */}
+                          <div className="mt-4 flex items-center justify-between border-t border-slate-800/80 pt-3 font-mono text-[11px] text-slate-400">
+                            <span>
+                              Quests activas hoy: <strong className="text-white">{hunter.missionsData.top3.length}/3</strong>
+                            </span>
+                            <span>
+                              {hunter.missionsData.remainingBacklog.length > 0
+                                ? `+${hunter.missionsData.remainingBacklog.length} en reserva inferior`
+                                : 'Reserva limpia ✓'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                {/* ============================================================ */}
+                {/* 4. RESERVA DE MISIONES / BACKLOG COLAPSADO POR CLIENTE       */}
+                {/* ============================================================ */}
+                <section
+                  aria-label="Reserva de Quests Colapsada por Cliente"
+                  className="rounded-2xl border border-slate-800/90 bg-[#0A0F1C] p-4 sm:p-6 shadow-xl"
+                >
+                  <div className="flex flex-col gap-4 border-b border-slate-800 pb-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Filter className="h-4 w-4 text-cyan-400" />
+                        <h2 className="font-mono text-xs font-extrabold uppercase tracking-wider text-white sm:text-sm">
+                          Reserva Táctica de Quests por Cliente (Acordeón Colapsado)
+                        </h2>
+                      </div>
+                      <p className="mt-0.5 font-mono text-[11px] text-slate-400">
+                        Colapsado por defecto para mantener el HUD enfocado en las 3 Quests del Día de Kevin y Marco.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-500" />
+                        <input
+                          type="text"
+                          value={backlogSearchQuery}
+                          onChange={(e) => setBacklogSearchQuery(e.target.value)}
+                          placeholder="Buscar quest..."
+                          className="w-40 sm:w-48 rounded-xl border border-slate-800 bg-slate-900 py-1.5 pl-8 pr-3 font-mono text-[11px] text-white placeholder-slate-500 outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div className="flex rounded-xl border border-slate-800 bg-slate-900 p-0.5 font-mono text-[11px]">
+                        {['all', 'Kevin', 'Marco'].map((who) => (
+                          <button
+                            key={who}
+                            type="button"
+                            onClick={() => setBacklogAssigneeFilter(who)}
+                            className={`rounded-lg px-2.5 py-1 transition-colors ${
+                              backlogAssigneeFilter === who
+                                ? 'bg-cyan-500 font-extrabold text-slate-950'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {who === 'all' ? 'Todos' : who}
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const anyOpen = Object.values(expandedBacklogClients).some(Boolean);
+                          if (anyOpen) {
+                            setExpandedBacklogClients({});
+                          } else {
+                            const allOpen = {};
+                            zendaClients.forEach((c) => {
+                              allOpen[c.id] = true;
+                            });
+                            setExpandedBacklogClients(allOpen);
+                          }
+                        }}
+                        className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-1.5 font-mono text-[11px] font-semibold text-slate-300 hover:border-slate-700 hover:text-white"
+                      >
+                        {Object.values(expandedBacklogClients).some(Boolean)
+                          ? 'Colapsar todo'
+                          : 'Expandir todo'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-2.5">
+                    {backlogByClient.map((group) => {
+                      const { client, filteredTasks, pendingBacklogCount } = group;
+                      const isExpanded = !!expandedBacklogClients[client.id];
+                      const quickVal = backlogQuickInputs[client.id] || '';
+
+                      return (
+                        <div
+                          key={`backlog-acc-${client.id}`}
+                          className="overflow-hidden rounded-2xl border border-slate-800/90 bg-[#070A12]"
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedBacklogClients((prev) => ({
+                                ...prev,
+                                [client.id]: !prev[client.id],
+                              }))
+                            }
+                            className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors hover:bg-slate-900/80"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span
+                                className="h-3.5 w-3.5 shrink-0 rounded-full ring-2 ring-white/20"
+                                style={{
+                                  backgroundColor: client.brandColors?.[0] || '#06B6D4',
+                                }}
+                              />
+                              <span className="text-sm font-extrabold text-white">
+                                {client.name}
+                              </span>
+                              <span className="rounded-full border border-slate-700 bg-slate-900 px-2.5 py-0.5 font-mono text-[10px] font-bold text-cyan-300">
+                                {pendingBacklogCount} en reserva
+                              </span>
+                            </div>
+
+                            <motion.span
+                              animate={{ rotate: isExpanded ? 180 : 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-800 bg-slate-900 text-slate-400"
+                            >
+                              <ChevronDown className="h-4 w-4" />
+                            </motion.span>
+                          </button>
+
+                          <AnimatePresence initial={false}>
+                            {isExpanded && (
+                              <motion.div
+                                key={`content-${client.id}`}
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.22 }}
+                                className="border-t border-slate-800 bg-[#05080F] p-4"
+                              >
+                                <form
+                                  onSubmit={(e) => {
+                                    e.preventDefault();
+                                    if (!quickVal.trim()) return;
+                                    handleQuickCreateMissionInline({
+                                      title: quickVal,
+                                      client: client.name,
+                                      assignee: client.leadOwner || 'Kevin',
+                                      questDifficulty: 'Guion',
+                                      priority: 'Media',
+                                      deadline: todayDateStr,
+                                      isTodayPinned: false,
+                                    });
+                                    setBacklogQuickInputs((prev) => ({
+                                      ...prev,
+                                      [client.id]: '',
+                                    }));
+                                  }}
+                                  className="mb-3 flex flex-col gap-2 sm:flex-row"
+                                >
+                                  <input
+                                    type="text"
+                                    value={quickVal}
+                                    onChange={(e) =>
+                                      setBacklogQuickInputs((prev) => ({
+                                        ...prev,
+                                        [client.id]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder={`+ Agregar Quest futura a la reserva de ${client.name}...`}
+                                    className="flex-1 rounded-xl border border-slate-800 bg-slate-900 px-3.5 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-400"
+                                  />
+                                  <button
+                                    type="submit"
+                                    className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-cyan-500 px-4 py-2 font-mono text-xs font-extrabold text-slate-950 hover:bg-cyan-400"
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                    Guardar Quest
+                                  </button>
+                                </form>
+
+                                {filteredTasks.length === 0 ? (
+                                  <p className="py-4 text-center font-mono text-xs text-slate-500">
+                                    Sin quests registradas en la reserva de {client.name}.
+                                  </p>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {filteredTasks.map((task) => {
+                                      const rpgSt = getQuestRpgStatus(task);
+                                      const diffInfo = getQuestDifficultyInfo(task);
+                                      const inTop3 = activeTop3IdsSet.has(task.id);
+                                      const assignee = normalizeAssignee(task.assignee);
+
+                                      return (
+                                        <div
+                                          key={task.id}
+                                          className="flex flex-col gap-2.5 rounded-xl border border-slate-800 bg-[#0A0F1D] p-3 sm:flex-row sm:items-center sm:justify-between"
+                                        >
+                                          <div className="space-y-1">
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                              {inTop3 && (
+                                                <span className="rounded border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 font-mono text-[10px] font-bold text-cyan-300">
+                                                  ⚡ En Tablero de Hoy
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={() => handleSwitchMissionAssignee(task)}
+                                                className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-bold ${
+                                                  assignee === 'Kevin'
+                                                    ? 'bg-cyan-500/20 text-cyan-300'
+                                                    : 'bg-orange-500/20 text-orange-300'
+                                                }`}
+                                              >
+                                                @{assignee}
+                                              </button>
+                                              <span
+                                                className={`rounded border px-2 py-0.5 font-mono text-[10px] font-bold ${diffInfo.colorClass}`}
+                                              >
+                                                {diffInfo.badgeLabel}
+                                              </span>
+                                            </div>
+                                            <p
+                                              className={`text-xs font-bold ${
+                                                rpgSt === 'Completado'
+                                                  ? 'line-through text-slate-500'
+                                                  : 'text-white'
+                                              }`}
+                                            >
+                                              {task.title}
+                                            </p>
+                                          </div>
+
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <button
+                                              type="button"
+                                              onClick={() => handleAdvanceQuestRpgState(task)}
+                                              className={`rounded-lg border px-2.5 py-1.5 font-mono text-[11px] font-extrabold transition-colors ${
+                                                rpgSt === 'Completado'
+                                                  ? 'border-emerald-500/40 bg-emerald-500/20 text-emerald-300'
+                                                  : 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-400 hover:text-slate-950'
+                                              }`}
+                                            >
+                                              {rpgSt} →
+                                            </button>
+
+                                            {!inTop3 && rpgSt !== 'Completado' && (
+                                              <button
+                                                type="button"
+                                                onClick={() => handlePromoteBacklogToToday(task)}
+                                                className="inline-flex items-center gap-1 rounded-lg border border-orange-500/40 bg-orange-500/15 px-2.5 py-1.5 font-mono text-[10px] font-extrabold text-orange-300 hover:bg-orange-500 hover:text-slate-950"
+                                              >
+                                                <Zap className="h-3 w-3" />
+                                                Subir a Quests de Hoy
+                                              </button>
+                                            )}
+
+                                            <button
+                                              type="button"
+                                              onClick={() => handleDeleteSprint(task.id)}
+                                              className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-500/15 hover:text-rose-400"
+                                            >
+                                              <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
               </motion.div>
             )}
 
@@ -3999,11 +5839,12 @@ export default function AdminDashboard() {
                   <code>zenda_calendar</code>, <code>zenda_finances</code> y <code>zenda_scripts</code>.
                 </p>
                 <div className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-3.5 font-mono text-[11px] text-slate-800">
-                  <p className="font-bold text-slate-900">Se sembrarán únicamente los 3 clientes oficiales en 0:</p>
+                  <p className="font-bold text-slate-900">Se sembrarán las 4 cuentas oficiales en 0:</p>
                   <ol className="mt-1.5 list-inside list-decimal space-y-1">
+                    <li>Zenda Agency (Growth Partner B2B &amp; Marca Propia)</li>
                     <li>Dolciangel (Pastelería &amp; Cafetería de Especialidad)</li>
-                    <li>Lalanchita (Cevichería &amp; Gastronomía Marina)</li>
-                    <li>King´s barber shop (Barbería &amp; Estilismo Masculino)</li>
+                    <li>La Lanchita (Cevichería &amp; Gastronomía Marina)</li>
+                    <li>King&apos;s Barber Shop (Barbería &amp; Estilismo Masculino)</li>
                   </ol>
                 </div>
               </div>
@@ -4355,7 +6196,7 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Modal 1: Nueva Tarea de Sprint */}
+      {/* Modal 1: Nueva Misión Operativa */}
       <AnimatePresence>
         {sprintModalOpen && (
           <motion.div
@@ -4376,7 +6217,7 @@ export default function AdminDashboard() {
             >
               <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                 <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-900">
-                  Nueva Tarea de Sprint
+                  Nueva Misión Operativa
                 </h3>
                 <button
                   type="button"
@@ -4390,33 +6231,52 @@ export default function AdminDashboard() {
               <form onSubmit={handleAddSprint} className="mt-5 space-y-4 text-xs">
                 <div>
                   <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                    Título de la Tarea / Entregable
+                    Título de la Misión / Pieza
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="Ej. Cierre de guiones semanales"
+                    placeholder="Ej. Reel autoridad IA para negocios"
                     value={newSprint.title}
                     onChange={(e) => setNewSprint({ ...newSprint, title: e.target.value })}
                     className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
                   />
                 </div>
 
-                <div>
-                  <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                    Cliente Asociado
-                  </label>
-                  <select
-                    value={newSprint.client}
-                    onChange={(e) => setNewSprint({ ...newSprint, client: e.target.value })}
-                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
-                  >
-                    {zendaClients.map((c) => (
-                      <option key={c.id} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
+                      Cuenta Asociada
+                    </label>
+                    <select
+                      value={newSprint.client}
+                      onChange={(e) => setNewSprint({ ...newSprint, client: e.target.value })}
+                      className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
+                    >
+                      {zendaClients.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
+                      Etapa Inicial
+                    </label>
+                    <select
+                      value={newSprint.stage || 'Guion'}
+                      onChange={(e) => setNewSprint({ ...newSprint, stage: e.target.value })}
+                      className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
+                    >
+                      {MISSION_STAGES.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -4429,7 +6289,7 @@ export default function AdminDashboard() {
                       onChange={(e) => setNewSprint({ ...newSprint, assignee: e.target.value })}
                       className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
                     >
-                      <option value="Angel">Angel</option>
+                      <option value="Kevin">Kevin</option>
                       <option value="Marco">Marco</option>
                     </select>
                   </div>
@@ -4453,7 +6313,7 @@ export default function AdminDashboard() {
 
                 <div>
                   <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                    Fecha Límite (Deadline)
+                    Fecha Objetivo
                   </label>
                   <input
                     type="date"
@@ -4479,7 +6339,7 @@ export default function AdminDashboard() {
                     transition={SPRING_TRANSITION}
                     className="rounded-xl bg-[#0F172A] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-slate-800"
                   >
-                    Guardar Tarea
+                    Guardar Misión
                   </motion.button>
                 </div>
               </form>
@@ -4577,7 +6437,7 @@ export default function AdminDashboard() {
                       onChange={(e) => setNewContent({ ...newContent, assignee: e.target.value })}
                       className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
                     >
-                      <option value="Angel">Angel</option>
+                      <option value="Kevin">Kevin</option>
                       <option value="Marco">Marco</option>
                     </select>
                   </div>
@@ -4753,7 +6613,7 @@ export default function AdminDashboard() {
                     onChange={(e) => setNewCalendarEvent({ ...newCalendarEvent, assignee: e.target.value })}
                     className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
                   >
-                    <option value="Angel">Angel</option>
+                    <option value="Kevin">Kevin</option>
                     <option value="Marco">Marco</option>
                     <option value="Ambos">Ambos</option>
                   </select>
@@ -5018,6 +6878,36 @@ export default function AdminDashboard() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Barra de Navegación Inferior Fija para Celular en Campo (md:hidden) */}
+      <nav
+        aria-label="Navegación Móvil en Campo"
+        className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-[#27272A] bg-[#09090B]/95 px-2 py-2 backdrop-blur-md md:hidden"
+      >
+        {[
+          { id: 'command', shortLabel: 'Hoy', icon: LayoutDashboard },
+          { id: 'clients', shortLabel: 'Cuentas', icon: Building2 },
+          { id: 'pipeline', shortLabel: 'Pipeline', icon: Film },
+          { id: 'calendar', shortLabel: 'Rodajes', icon: CalendarIcon },
+          { id: 'finances', shortLabel: 'Caja', icon: Wallet },
+        ].map((navItem) => {
+          const NavIcon = navItem.icon;
+          const isActive = activeTab === navItem.id;
+          return (
+            <button
+              key={`mob-nav-${navItem.id}`}
+              type="button"
+              onClick={() => setActiveTab(navItem.id)}
+              className={`flex flex-col items-center justify-center rounded-xl px-3 py-1.5 font-mono text-[10px] transition-colors ${
+                isActive ? 'bg-white/15 font-bold text-white' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              <NavIcon className={`h-4 w-4 ${isActive ? 'text-zenda-cyan' : 'text-zinc-400'}`} />
+              <span className="mt-0.5">{navItem.shortLabel}</span>
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 }
