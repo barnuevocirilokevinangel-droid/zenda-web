@@ -597,10 +597,26 @@ export default function AdminDashboard() {
 
   // Mini-modal de Penalización Competitiva 1v1 (-100 XP)
   const [penaltyModalOpen, setPenaltyModalOpen] = useState(false);
+  const [penaltyConfirmStep, setPenaltyConfirmStep] = useState(false);
   const [penaltyForm, setPenaltyForm] = useState({
     player: 'Kevin',
     reason: 'Incumplimiento / Quedarse dormido',
   });
+
+  // Modal de confirmación con candado para Reiniciar Duelo 1v1 a 0 XP
+  const [resetDuelModalOpen, setResetDuelModalOpen] = useState(false);
+  const [resetDuelConfirmText, setResetDuelConfirmText] = useState('');
+  const resetDuelCancelBtnRef = useRef(null);
+
+  useEffect(() => {
+    if (resetDuelModalOpen) {
+      const timer = setTimeout(() => {
+        resetDuelCancelBtnRef.current?.focus();
+      }, 20);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [resetDuelModalOpen]);
 
   // Modal de Perfil 360° & Métricas Reales de Redes (TikTok, IG, FB, Reels, WhatsApp)
   const [metricsModalClientId, setMetricsModalClientId] = useState(null);
@@ -1636,14 +1652,48 @@ export default function AdminDashboard() {
   // REINICIAR TEMPORADA A 0 (0 XP, LVL 1, Racha 0d, 0/12 Reels) & REINICIO BASE
   // ============================================================================
 
+  const handleOpenResetDuelModal = () => {
+    setResetDuelConfirmText('');
+    setResetDuelModalOpen(true);
+  };
+
   const handleResetSeasonToZero = async () => {
+    if (resetDuelConfirmText.trim().toUpperCase() !== 'REINICIAR') return;
     setIsResettingSeason(true);
     try {
       const nowWriteMs = Date.now();
+      const nowIso = new Date(nowWriteMs).toISOString();
       lastLocalRpgWriteMsRef.current = nowWriteMs;
       const preCompletedIds = sprints
         .filter((s) => getQuestRpgStatus(s) === 'Completado')
         .map((s) => s.id);
+
+      const prevHistory = Array.isArray(rpgState.history) ? rpgState.history : [];
+      const prevActivity = Array.isArray(rpgState.activityLog) ? rpgState.activityLog : [];
+      const hasDuelSnapshot =
+        kevinTotalXP > 0 ||
+        marcoTotalXP > 0 ||
+        weeklyPublishedCount > 0 ||
+        prevActivity.length > 0;
+
+      const closureEntry = hasDuelSnapshot
+        ? {
+            id: `hist-duel-close-${nowWriteMs}`,
+            type: 'quest',
+            player: duelLeader || 'Kevin',
+            account: 'Cierre Duelo 1v1',
+            title: `Cierre Duelo 1v1 · Kevin ${kevinTotalXP} XP vs Marco ${marcoTotalXP} XP (${weeklyPublishedCount}/${WEEKLY_AGENCY_GOAL} Reels)`,
+            link: '',
+            xp: Math.max(kevinTotalXP, marcoTotalXP),
+            date: todayDateStr,
+            time: formatExactTime(new Date(nowWriteMs)),
+            createdAt: nowIso,
+          }
+        : null;
+
+      const preservedHistory = closureEntry
+        ? [closureEntry, ...prevHistory].slice(0, 200)
+        : prevHistory.slice(0, 200);
 
       const zeroSeasonPayload = getOfficialZeroRpgDefaults({
         weeklyRewards:
@@ -1656,9 +1706,10 @@ export default function AdminDashboard() {
         webhookUrl: rpgState.webhookUrl || '',
         soundEnabled: rpgState.soundEnabled ?? true,
         customCategories: rpgState.customCategories || [],
+        history: preservedHistory,
         creditedQuestIds: preCompletedIds,
         quests: sprints,
-        updatedAt: new Date(nowWriteMs).toISOString(),
+        updatedAt: nowIso,
         updatedAtMs: nowWriteMs,
       });
 
@@ -1691,7 +1742,13 @@ export default function AdminDashboard() {
         ]);
       }
 
-      showToast('Temporada reiniciada a 0 XP · LVL 1 · 0/12 Reels');
+      setResetDuelConfirmText('');
+      setResetDuelModalOpen(false);
+      showToast(
+        hasDuelSnapshot
+          ? 'Duelo archivado en Historial y reiniciado a 0 XP'
+          : 'Duelo reiniciado a 0 XP · LVL 1 · 0/12 Reels',
+      );
     } catch (err) {
       console.warn('[Firestore] Error reiniciando temporada a 0:', err);
       showToast('Error al reiniciar temporada');
@@ -4433,7 +4490,7 @@ export default function AdminDashboard() {
                     <button
                       type="button"
                       disabled={isResettingSeason}
-                      onClick={handleResetSeasonToZero}
+                      onClick={handleOpenResetDuelModal}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 font-mono text-[11px] font-semibold text-[#0F172A] transition-colors hover:border-[#0066C5] hover:text-[#0066C5] disabled:opacity-50"
                     >
                       <RotateCcw className="h-3 w-3" />
@@ -4629,7 +4686,10 @@ export default function AdminDashboard() {
                         <div className="flex items-center gap-1.5">
                           <button
                             type="button"
-                            onClick={() => setPenaltyModalOpen(true)}
+                            onClick={() => {
+                              setPenaltyConfirmStep(false);
+                              setPenaltyModalOpen(true);
+                            }}
                             className="rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/5 px-2.5 py-1 font-mono text-[11px] font-semibold text-[#EF4444] transition-colors hover:bg-[#EF4444] hover:text-white"
                             title="Aplicar penalización (-100 XP)"
                           >
@@ -4639,7 +4699,7 @@ export default function AdminDashboard() {
                           <button
                             type="button"
                             disabled={isResettingSeason}
-                            onClick={handleResetSeasonToZero}
+                            onClick={handleOpenResetDuelModal}
                             className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 font-mono text-[11px] font-semibold text-slate-600 transition-colors hover:border-[#0066C5] hover:text-[#0066C5]"
                             title="Reiniciar temporada a 0 XP"
                           >
@@ -9387,7 +9447,7 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Modal 7: Mini-Modal de Penalización Competitiva 1v1 (-100 XP) */}
+      {/* Modal 7: Mini-Modal de Penalización Competitiva 1v1 (-100 XP) con Confirmación Obligatoria */}
       <AnimatePresence>
         {penaltyModalOpen && (
           <motion.div
@@ -9396,7 +9456,10 @@ export default function AdminDashboard() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
-            onClick={() => setPenaltyModalOpen(false)}
+            onClick={() => {
+              setPenaltyConfirmStep(false);
+              setPenaltyModalOpen(false);
+            }}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.96, y: 10 }}
@@ -9417,74 +9480,240 @@ export default function AdminDashboard() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setPenaltyModalOpen(false)}
+                  onClick={() => {
+                    setPenaltyConfirmStep(false);
+                    setPenaltyModalOpen(false);
+                  }}
                   className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0F172A]"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
 
-              <form onSubmit={handleApplyPenalty} className="mt-4 space-y-4 text-xs">
-                <div>
-                  <label className="mb-1.5 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
-                    Jugador Penalizado (-100 XP)
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {['Kevin', 'Marco'].map((who) => {
-                      const isSelected = penaltyForm.player === who;
-                      return (
-                        <button
-                          key={who}
-                          type="button"
-                          onClick={() => setPenaltyForm({ ...penaltyForm, player: who })}
-                          className={`rounded-xl border px-3 py-2.5 font-mono text-xs font-bold transition-colors ${
-                            isSelected
-                              ? 'border-[#EF4444] bg-[#EF4444] text-white shadow-sm'
-                              : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#0F172A] hover:border-[#EF4444]'
-                          }`}
-                        >
-                          {who} (-100 XP)
-                        </button>
-                      );
-                    })}
+              {!penaltyConfirmStep ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setPenaltyConfirmStep(true);
+                  }}
+                  className="mt-4 space-y-4 text-xs"
+                >
+                  <div>
+                    <label className="mb-1.5 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                      Jugador Penalizado (-100 XP)
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {['Kevin', 'Marco'].map((who) => {
+                        const isSelected = penaltyForm.player === who;
+                        return (
+                          <button
+                            key={who}
+                            type="button"
+                            onClick={() => setPenaltyForm({ ...penaltyForm, player: who })}
+                            className={`rounded-xl border px-3 py-2.5 font-mono text-xs font-bold transition-colors ${
+                              isSelected
+                                ? 'border-[#EF4444] bg-[#EF4444] text-white shadow-sm'
+                                : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#0F172A] hover:border-[#EF4444]'
+                            }`}
+                          >
+                            {who} (-100 XP)
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
+
+                  <div>
+                    <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                      Motivo de la Penalización
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej. Quedarse dormido (no check-in 7:30 AM) / Incumplimiento de entrega"
+                      value={penaltyForm.reason}
+                      onChange={(e) =>
+                        setPenaltyForm({ ...penaltyForm, reason: e.target.value })
+                      }
+                      className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2.5 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPenaltyConfirmStep(false);
+                        setPenaltyModalOpen(false);
+                      }}
+                      className="rounded-xl px-4 py-2 font-mono text-xs text-slate-500 hover:text-[#0F172A]"
+                    >
+                      Cancelar
+                    </button>
+                    <motion.button
+                      type="submit"
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.96 }}
+                      transition={SPRING_TRANSITION}
+                      className="rounded-xl bg-[#EF4444] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-red-600"
+                    >
+                      Continuar →
+                    </motion.button>
+                  </div>
+                </form>
+              ) : (
+                <div className="mt-4 space-y-4 text-xs">
+                  <div className="rounded-xl border border-[#EF4444]/30 bg-[#EF4444]/5 p-4">
+                    <p className="text-sm font-bold text-[#0F172A]">
+                      ¿Aplicar penalización de -100 XP a {penaltyForm.player}?
+                    </p>
+                    <p className="mt-1.5 font-mono text-[11px] text-slate-600">
+                      Motivo: <strong className="text-[#0F172A]">{penaltyForm.reason}</strong>
+                    </p>
+                    <p className="mt-1 font-mono text-[11px] text-slate-500">
+                      Se descontarán 100 XP de su marcador actual (sin bajar de 0 XP) y quedará registrado en el Historial.
+                    </p>
+                  </div>
+
+                  <div className="flex justify-end gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      autoFocus
+                      onClick={() => setPenaltyConfirmStep(false)}
+                      className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2 font-mono text-xs font-semibold text-[#0F172A] hover:bg-slate-100"
+                    >
+                      Cancelar
+                    </button>
+                    <motion.button
+                      type="button"
+                      whileHover={{ y: -1 }}
+                      whileTap={{ scale: 0.96 }}
+                      transition={SPRING_TRANSITION}
+                      onClick={(e) => {
+                        setPenaltyConfirmStep(false);
+                        handleApplyPenalty(e);
+                      }}
+                      className="rounded-xl bg-[#EF4444] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-red-600"
+                    >
+                      Sí, descontar -100 XP
+                    </motion.button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal 7B: Confirmación con Candado para Reiniciar Duelo 1v1 a 0 XP */}
+      <AnimatePresence>
+        {resetDuelModalOpen && (
+          <motion.div
+            key="modal-reset-duel-confirm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm"
+            onClick={() => {
+              if (!isResettingSeason) {
+                setResetDuelConfirmText('');
+                setResetDuelModalOpen(false);
+              }
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              transition={SPRING_TRANSITION}
+              className="w-full max-w-md rounded-2xl border border-[#E2E8F0] bg-white p-6 text-[#0F172A] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between border-b border-[#E2E8F0] pb-4">
+                <div>
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#EF4444]">
+                    Acción Destructiva · Duelo 1v1
+                  </span>
+                  <h3 className="mt-0.5 text-base font-bold text-[#0F172A]">
+                    ¿Reiniciar Duelo 1v1 a 0 XP?
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  disabled={isResettingSeason}
+                  onClick={() => {
+                    setResetDuelConfirmText('');
+                    setResetDuelModalOpen(false);
+                  }}
+                  className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0F172A]"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-3.5 text-xs leading-relaxed text-slate-600">
+                <p>
+                  Esta acción pondrá en <strong className="text-[#0F172A]">0 XP</strong> (LVL 1 y racha 0d) a{' '}
+                  <strong className="text-[#0066C5]">Kevin</strong> y <strong className="text-[#0F172A]">Marco</strong>,
+                  reiniciará a <strong className="text-[#0F172A]">0/12 Reels</strong> la Meta Semanal y limpiará la actividad del duelo actual.
+                </p>
+
+                <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3 font-mono text-[11px] text-slate-700">
+                  <div className="flex items-center justify-between">
+                    <span>Marcador actual:</span>
+                    <span className="font-bold text-[#0F172A]">
+                      Kevin {kevinTotalXP.toLocaleString()} XP · Marco {marcoTotalXP.toLocaleString()} XP
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[10px] text-[#10B981]">
+                    ✓ Se guardará automáticamente el cierre del duelo en Historial antes de ponerlo en 0.
+                  </p>
                 </div>
 
                 <div>
-                  <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
-                    Motivo de la Penalización
+                  <label className="mb-1.5 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    Escribe <span className="text-[#EF4444]">REINICIAR</span> para desbloquear el botón
                   </label>
                   <input
                     type="text"
-                    required
-                    placeholder="Ej. Quedarse dormido (no check-in 7:30 AM) / Incumplimiento de entrega"
-                    value={penaltyForm.reason}
-                    onChange={(e) =>
-                      setPenaltyForm({ ...penaltyForm, reason: e.target.value })
-                    }
-                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
+                    value={resetDuelConfirmText}
+                    onChange={(e) => setResetDuelConfirmText(e.target.value)}
+                    placeholder="REINICIAR"
+                    autoComplete="off"
+                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-xs font-bold uppercase tracking-wider text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#EF4444] focus:bg-white"
                   />
                 </div>
+              </div>
 
-                <div className="flex justify-end gap-2.5 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setPenaltyModalOpen(false)}
-                    className="rounded-xl px-4 py-2 font-mono text-xs text-slate-500 hover:text-[#0F172A]"
-                  >
-                    Cancelar
-                  </button>
-                  <motion.button
-                    type="submit"
-                    whileHover={{ y: -1 }}
-                    whileTap={{ scale: 0.96 }}
-                    transition={SPRING_TRANSITION}
-                    className="rounded-xl bg-[#EF4444] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-red-600"
-                  >
-                    Confirmar Penalización (-100 XP)
-                  </motion.button>
-                </div>
-              </form>
+              <div className="mt-6 flex justify-end gap-2.5">
+                <button
+                  ref={resetDuelCancelBtnRef}
+                  type="button"
+                  autoFocus
+                  disabled={isResettingSeason}
+                  onClick={() => {
+                    setResetDuelConfirmText('');
+                    setResetDuelModalOpen(false);
+                  }}
+                  className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2 font-mono text-xs font-bold text-[#0F172A] hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#0066C5]"
+                >
+                  Cancelar
+                </button>
+                <motion.button
+                  type="button"
+                  disabled={
+                    isResettingSeason ||
+                    resetDuelConfirmText.trim().toUpperCase() !== 'REINICIAR'
+                  }
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.96 }}
+                  transition={SPRING_TRANSITION}
+                  onClick={handleResetSeasonToZero}
+                  className="rounded-xl bg-[#EF4444] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isResettingSeason ? 'Reiniciando...' : 'Sí, reiniciar a 0'}
+                </motion.button>
+              </div>
             </motion.div>
           </motion.div>
         )}
