@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -30,6 +30,7 @@ import {
   Menu,
   MessageCircle,
   Palette,
+  Pencil,
   Percent,
   Plus,
   RotateCcw,
@@ -46,12 +47,19 @@ import usePageMeta from '../../lib/usePageMeta.js';
 import { buildWhatsAppLink } from '../../lib/whatsapp.js';
 
 const SPRING_TRANSITION = { type: 'spring', stiffness: 400, damping: 25 };
-const MISSION_STAGES = ['Guion', 'Grabado', 'Editado', 'Publicado'];
 const QUEST_STATES = ['Pendiente', 'En Curso', 'Completado'];
 const WEEKLY_AGENCY_GOAL = 12;
 const XP_PER_LEVEL = 500;
 const CURRENT_SEASON_VERSION = 'official_zero_v1';
 const QUICK_XP_PRESETS = [50, 100, 150, 250, 500];
+const REWARD_EMOJI_OPTIONS = ['💪', '🌅', '🍔', '⚡', '🎮', '🍕', '🏖️', '🏆'];
+
+const DEFAULT_WEEKLY_REWARDS = [
+  { id: 'rew-gym', emoji: '💪', title: 'Ir al gym juntos' },
+  { id: 'rew-salida', emoji: '🌅', title: 'Salida de tarde' },
+  { id: 'rew-cena', emoji: '🍔', title: 'Cena libre' },
+  { id: 'rew-tarde', emoji: '⚡', title: 'Tarde libre de socios' },
+];
 
 const DEFAULT_SOCIAL_METRICS = {
   tiktokFollowers: 0,
@@ -261,13 +269,32 @@ function normalizeAccountKey(rawName) {
 }
 
 /**
- * Normaliza el responsable operativo diario: Kevin vs Marco
- * (Mapea registros históricos de 'Angel' a 'Kevin' para mantener continuidad total).
+ * Normaliza el responsable operativo diario: Kevin vs Marco vs Ambos
+ * (Reconoce variantes como "marco", "MC", "@Marco", "Marco · Director de Campo", "Ambos", etc.)
  */
 function normalizeAssignee(rawAssignee) {
-  const s = String(rawAssignee || '').trim().toLowerCase();
-  if (s === 'marco') return 'Marco';
+  const s = String(rawAssignee || '')
+    .trim()
+    .toLowerCase();
+  if (s.includes('ambos') || (s.includes('kevin') && s.includes('marco'))) {
+    return 'Ambos';
+  }
+  if (s.includes('marco') || s === 'mc' || s === '@mc') {
+    return 'Marco';
+  }
   return 'Kevin';
+}
+
+function isAssignedToPlayer(rawAssignee, targetPlayer) {
+  const norm = normalizeAssignee(rawAssignee);
+  return norm === targetPlayer || norm === 'Ambos';
+}
+
+function getAssigneeTargets(rawAssignee) {
+  const norm = normalizeAssignee(rawAssignee);
+  if (norm === 'Ambos') return ['Kevin', 'Marco'];
+  if (norm === 'Marco') return ['Marco'];
+  return ['Kevin'];
 }
 
 /**
@@ -295,7 +322,7 @@ function getQuestDifficultyInfo(task) {
   }
 
   const parsedCustomXp = Number(task?.customXp);
-  if (!Number.isNaN(parsedCustomXp) && parsedCustomXp > 0) {
+  if (Number.isFinite(parsedCustomXp) && parsedCustomXp > 0) {
     const labelText = task?.questDifficulty || basePreset.label || 'Reto';
     return {
       ...basePreset,
@@ -327,31 +354,6 @@ function getQuestRpgStatus(task) {
   if (task.completed || task.stage === 'Publicado') return 'Completado';
   if (task.stage === 'Grabado' || task.stage === 'Editado') return 'En Curso';
   return 'Pendiente';
-}
-
-/**
- * Normaliza la etapa de cualquier tarea al flujo rápido de 1 clic:
- * Guion → Grabado → Editado → Publicado
- */
-function getMissionStage(task) {
-  if (!task) return 'Guion';
-  if (task.questStatus === 'Completado') return 'Publicado';
-  if (task.questStatus === 'En Curso' && (!task.stage || task.stage === 'Guion')) {
-    return 'Grabado';
-  }
-  if (task.stage && MISSION_STAGES.includes(task.stage)) {
-    return task.stage;
-  }
-  if (task.completed || task.stage === 'Publicado') return 'Publicado';
-  if (
-    task.stage === 'En edición / Agente' ||
-    task.stage === 'En Edición IA' ||
-    task.stage === 'Aprobado'
-  ) {
-    return 'Editado';
-  }
-  if (task.stage === 'Grabado') return 'Grabado';
-  return 'Guion';
 }
 
 // ============================================================================
@@ -604,6 +606,19 @@ export default function AdminDashboard() {
   const [metricsModalClientId, setMetricsModalClientId] = useState(null);
   const [metricsDraft, setMetricsDraft] = useState(DEFAULT_SOCIAL_METRICS);
 
+  // Modal CRUD de Recompensas Semanales Elegibles
+  const [rewardsModalOpen, setRewardsModalOpen] = useState(false);
+  const [editingRewardId, setEditingRewardId] = useState(null);
+  const [rewardForm, setRewardForm] = useState({
+    emoji: '💪',
+    title: '',
+  });
+
+  // Bloqueos sincrónicos anti-doble clic y control de concurrencia con Firestore
+  const processingQuestIdsRef = useRef(new Set());
+  const isPublishingReelRef = useRef(false);
+  const lastLocalRpgWriteMsRef = useRef(0);
+
   // Estado RPG Oficial (Temporada 0 XP) sincronizado en tiempo real con Firestore ('zenda_system/rpg_state')
   // manteniendo localStorage ('zenda_rpg_os_v2') únicamente como caché rápida de arranque
   const [rpgSyncOnline, setRpgSyncOnline] = useState(() => Boolean(isFirebaseConfigured && db));
@@ -631,8 +646,12 @@ export default function AdminDashboard() {
       clientsHp: defaultClientHp,
       clientLastPublishedMap: {},
       weeklyReels: 0,
-      weeklyReward: 'Cena Libre + Tarde Libre de Socios',
+      weeklyRewards: DEFAULT_WEEKLY_REWARDS,
+      activeRewardId: 'rew-cena',
+      weeklyReward: '🍔 Cena libre',
+      weeklyRewardText: '🍔 Cena libre',
       quests: [],
+      creditedQuestIds: [],
       activityLog: [],
       history: [],
       customCategories: [],
@@ -645,13 +664,13 @@ export default function AdminDashboard() {
       marcoEarlyStreak: 0,
       kevinLastCheckIn: '',
       marcoLastCheckIn: '',
-      weeklyRewardText: 'Cena Libre + Tarde Libre de Socios',
       soundEnabled: true,
       manualHoursOverride: {},
       clientHpMap: defaultClientHp,
       manualBossReelsBonus: 0,
       bossChestReelsCount: 0,
       updatedAt: '',
+      updatedAtMs: 0,
       ...overrides,
     };
   };
@@ -667,10 +686,18 @@ export default function AdminDashboard() {
         localStorage.removeItem('zenda_rpg_os_v2');
         return defaults;
       }
-      const kevinXP = Number(parsed.kevinBaseXP ?? parsed.xp?.Kevin ?? 0);
-      const marcoXP = Number(parsed.marcoBaseXP ?? parsed.xp?.Marco ?? 0);
-      const kevinStrk = Number(parsed.kevinEarlyStreak ?? parsed.streak?.Kevin ?? 0);
-      const marcoStrk = Number(parsed.marcoEarlyStreak ?? parsed.streak?.Marco ?? 0);
+      const rawKevinXP = Number(parsed.kevinBaseXP ?? parsed.xp?.Kevin ?? 0);
+      const rawMarcoXP = Number(parsed.marcoBaseXP ?? parsed.xp?.Marco ?? 0);
+      const kevinXP = Number.isFinite(rawKevinXP) ? Math.max(0, rawKevinXP) : 0;
+      const marcoXP = Number.isFinite(rawMarcoXP) ? Math.max(0, rawMarcoXP) : 0;
+      const kevinStrk = Math.max(0, Number(parsed.kevinEarlyStreak ?? parsed.streak?.Kevin ?? 0) || 0);
+      const marcoStrk = Math.max(0, Number(parsed.marcoEarlyStreak ?? parsed.streak?.Marco ?? 0) || 0);
+      const savedRewards =
+        Array.isArray(parsed.weeklyRewards) && parsed.weeklyRewards.length > 0
+          ? parsed.weeklyRewards
+          : DEFAULT_WEEKLY_REWARDS;
+      const savedActiveId = parsed.activeRewardId || savedRewards[0]?.id || 'rew-cena';
+
       return {
         ...defaults,
         ...parsed,
@@ -688,11 +715,15 @@ export default function AdminDashboard() {
         streak: { Kevin: kevinStrk, Marco: marcoStrk },
         clientsHp: parsed.clientsHp || parsed.clientHpMap || defaults.clientsHp,
         clientLastPublishedMap: parsed.clientLastPublishedMap || {},
+        weeklyRewards: savedRewards,
+        activeRewardId: savedActiveId,
         weeklyReward: parsed.weeklyReward || parsed.weeklyRewardText || defaults.weeklyReward,
+        creditedQuestIds: Array.isArray(parsed.creditedQuestIds) ? parsed.creditedQuestIds : [],
         activityLog: Array.isArray(parsed.activityLog) ? parsed.activityLog : [],
         history: Array.isArray(parsed.history) ? parsed.history : [],
         customCategories: Array.isArray(parsed.customCategories) ? parsed.customCategories : [],
         webhookUrl: parsed.webhookUrl || '',
+        updatedAtMs: Number(parsed.updatedAtMs) || 0,
       };
     } catch {
       return defaults;
@@ -703,50 +734,65 @@ export default function AdminDashboard() {
     if (!isFirebaseConfigured || !db) return;
     try {
       const { doc, setDoc } = await import('firebase/firestore');
-      await setDoc(doc(db, 'zenda_system', 'rpg_state'), payload, { merge: true });
-      setRpgSyncOnline(true);
-    } catch (err) {
-      console.warn('[Firestore] Error sincronizando zenda_system/rpg_state:', err);
-      try {
-        const { doc, setDoc } = await import('firebase/firestore');
-        await setDoc(
+      await Promise.allSettled([
+        setDoc(doc(db, 'zenda_system', 'rpg_state'), payload, { merge: true }),
+        setDoc(
           doc(db, 'zenda_clients', 'client-zenda-agency'),
           { rpgStateMirror: payload },
           { merge: true },
-        );
-        setRpgSyncOnline(true);
-      } catch {
-        // ignore fallback error
-      }
+        ),
+      ]);
+      setRpgSyncOnline(true);
+    } catch (err) {
+      console.warn('[Firestore] Error sincronizando estado RPG:', err);
     }
   };
 
   const updateRpgState = (updater) => {
+    const writeMs = Date.now();
+    lastLocalRpgWriteMsRef.current = writeMs;
+
     setRpgState((prev) => {
       const partial = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
-      const kevinXP = Math.max(
-        0,
-        Number(partial.kevinBaseXP ?? partial.xp?.Kevin ?? prev.kevinBaseXP ?? prev.xp?.Kevin ?? 0),
+      const rawKevinXP = Number(
+        partial.kevinBaseXP ?? partial.xp?.Kevin ?? prev.kevinBaseXP ?? prev.xp?.Kevin ?? 0,
       );
-      const marcoXP = Math.max(
-        0,
-        Number(partial.marcoBaseXP ?? partial.xp?.Marco ?? prev.marcoBaseXP ?? prev.xp?.Marco ?? 0),
+      const rawMarcoXP = Number(
+        partial.marcoBaseXP ?? partial.xp?.Marco ?? prev.marcoBaseXP ?? prev.xp?.Marco ?? 0,
       );
+      const kevinXP = Number.isFinite(rawKevinXP) ? Math.max(0, Math.round(rawKevinXP)) : 0;
+      const marcoXP = Number.isFinite(rawMarcoXP) ? Math.max(0, Math.round(rawMarcoXP)) : 0;
       const kevinLvl = Math.floor(kevinXP / XP_PER_LEVEL) + 1;
       const marcoLvl = Math.floor(marcoXP / XP_PER_LEVEL) + 1;
       const kevinStrk = Math.max(
         0,
-        Number(partial.kevinEarlyStreak ?? partial.streak?.Kevin ?? prev.kevinEarlyStreak ?? 0),
+        Number(partial.kevinEarlyStreak ?? partial.streak?.Kevin ?? prev.kevinEarlyStreak ?? 0) || 0,
       );
       const marcoStrk = Math.max(
         0,
-        Number(partial.marcoEarlyStreak ?? partial.streak?.Marco ?? prev.marcoEarlyStreak ?? 0),
+        Number(partial.marcoEarlyStreak ?? partial.streak?.Marco ?? prev.marcoEarlyStreak ?? 0) || 0,
       );
+
+      const nextWeeklyRewards = Array.isArray(partial.weeklyRewards)
+        ? partial.weeklyRewards
+        : Array.isArray(prev.weeklyRewards) && prev.weeklyRewards.length > 0
+        ? prev.weeklyRewards
+        : DEFAULT_WEEKLY_REWARDS;
+
+      const requestedRewardId = partial.activeRewardId ?? prev.activeRewardId;
+      const matchingReward =
+        nextWeeklyRewards.find((r) => r.id === requestedRewardId) ||
+        nextWeeklyRewards[0] || {
+          id: 'rew-fallback',
+          emoji: '🏆',
+          title: 'Recompensa de Socios',
+        };
+      const resolvedActiveRewardId = matchingReward.id;
       const rewardStr =
         partial.weeklyRewardText ??
         partial.weeklyReward ??
-        prev.weeklyRewardText ??
-        'Cena Libre + Tarde Libre de Socios';
+        `${matchingReward.emoji} ${matchingReward.title}`;
+
       const mergedHp = {
         ...(prev.clientHpMap || {}),
         ...(prev.clientsHp || {}),
@@ -759,7 +805,7 @@ export default function AdminDashboard() {
       };
       const reelsCount = Math.max(
         0,
-        Number(partial.weeklyReels ?? partial.bossChestReelsCount ?? prev.bossChestReelsCount ?? 0),
+        Number(partial.weeklyReels ?? partial.bossChestReelsCount ?? prev.bossChestReelsCount ?? 0) || 0,
       );
       const nextActivityLog = Array.isArray(partial.activityLog)
         ? partial.activityLog.slice(0, 15)
@@ -776,6 +822,11 @@ export default function AdminDashboard() {
         : Array.isArray(prev.customCategories)
         ? prev.customCategories
         : [];
+      const nextCreditedQuestIds = Array.isArray(partial.creditedQuestIds)
+        ? partial.creditedQuestIds
+        : Array.isArray(prev.creditedQuestIds)
+        ? prev.creditedQuestIds
+        : [];
       const nextWebhookUrl =
         partial.webhookUrl !== undefined ? partial.webhookUrl : prev.webhookUrl || '';
 
@@ -789,6 +840,8 @@ export default function AdminDashboard() {
         marcoLevel: marcoLvl,
         kevinEarlyStreak: kevinStrk,
         marcoEarlyStreak: marcoStrk,
+        weeklyRewards: nextWeeklyRewards,
+        activeRewardId: resolvedActiveRewardId,
         weeklyRewardText: rewardStr,
         weeklyReward: rewardStr,
         clientHpMap: mergedHp,
@@ -799,6 +852,7 @@ export default function AdminDashboard() {
         xp: { Kevin: kevinXP, Marco: marcoXP },
         level: { Kevin: kevinLvl, Marco: marcoLvl },
         streak: { Kevin: kevinStrk, Marco: marcoStrk },
+        creditedQuestIds: nextCreditedQuestIds,
         activityLog: nextActivityLog,
         history: nextHistory,
         customCategories: nextCustomCategories,
@@ -808,14 +862,17 @@ export default function AdminDashboard() {
           : Array.isArray(prev.quests)
           ? prev.quests
           : [],
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(writeMs).toISOString(),
+        updatedAtMs: writeMs,
       };
       try {
         localStorage.setItem('zenda_rpg_os_v2', JSON.stringify(next));
       } catch {
         // ignore localStorage cache errors
       }
-      persistRpgToFirestore(next);
+      setTimeout(() => {
+        persistRpgToFirestore(next);
+      }, 0);
       return next;
     });
   };
@@ -861,8 +918,9 @@ export default function AdminDashboard() {
     contact: '',
   });
 
-  // Modales de otros módulos
+  // Modal CRUD de Misiones (+ Misión / Editar Misión)
   const [sprintModalOpen, setSprintModalOpen] = useState(false);
+  const [editingQuestId, setEditingQuestId] = useState(null);
   const [newSprint, setNewSprint] = useState(() => ({
     title: '',
     client: 'Zenda Agency',
@@ -870,7 +928,7 @@ export default function AdminDashboard() {
     questDifficulty: 'Guion',
     customXp: 100,
     stage: 'Guion',
-    priority: 'Alta',
+    priority: 'Urgente',
     deadline: getTodayDate(),
   }));
 
@@ -1162,10 +1220,12 @@ export default function AdminDashboard() {
             async (docSnap) => {
               setRpgSyncOnline(true);
               if (!docSnap.exists() || docSnap.data()?.seasonVersion !== CURRENT_SEASON_VERSION) {
-                // Reinicio oficial a 0 XP, LVL 1, Racha 0d, 0/12 Reels al iniciar temporada oficial
+                const nowWriteMs = Date.now();
+                lastLocalRpgWriteMsRef.current = nowWriteMs;
                 const zeroPayload = getOfficialZeroRpgDefaults({
                   webhookUrl: docSnap.exists() ? docSnap.data()?.webhookUrl || '' : '',
-                  updatedAt: new Date().toISOString(),
+                  updatedAt: new Date(nowWriteMs).toISOString(),
+                  updatedAtMs: nowWriteMs,
                 });
                 setRpgState(zeroPayload);
                 try {
@@ -1174,30 +1234,47 @@ export default function AdminDashboard() {
                   // ignore cache write error
                 }
                 try {
-                  await setDoc(rpgDocRef, zeroPayload);
-                  await Promise.all(
-                    OFFICIAL_INITIAL_CLIENTS.map((client) =>
+                  await Promise.allSettled([
+                    setDoc(rpgDocRef, zeroPayload),
+                    ...OFFICIAL_INITIAL_CLIENTS.map((client) =>
                       setDoc(
                         doc(db, 'zenda_clients', client.id),
-                        { videosPublicadosEstaSemana: 0 },
+                        {
+                          videosPublicadosEstaSemana: 0,
+                          ...(client.id === 'client-zenda-agency'
+                            ? { rpgStateMirror: zeroPayload }
+                            : {}),
+                        },
                         { merge: true },
                       ),
                     ),
-                  );
+                  ]);
                 } catch (seedErr) {
                   console.warn('[Firestore] No se pudo inicializar temporada 0 en zenda_system/rpg_state:', seedErr);
                 }
               } else {
                 const cloudData = docSnap.data();
                 setRpgState((prev) => {
-                  const kevinXP = Math.max(
-                    0,
-                    Number(cloudData.kevinBaseXP ?? cloudData.xp?.Kevin ?? prev.kevinBaseXP ?? 0),
+                  const cloudMs =
+                    Number(cloudData.updatedAtMs) ||
+                    (cloudData.updatedAt ? Date.parse(cloudData.updatedAt) : 0) ||
+                    0;
+                  const localMs = Math.max(
+                    Number(prev.updatedAtMs) || 0,
+                    lastLocalRpgWriteMsRef.current || 0,
                   );
-                  const marcoXP = Math.max(
-                    0,
-                    Number(cloudData.marcoBaseXP ?? cloudData.xp?.Marco ?? prev.marcoBaseXP ?? 0),
+                  if (localMs > 0 && cloudMs > 0 && cloudMs < localMs) {
+                    return prev;
+                  }
+
+                  const rawKevinXP = Number(
+                    cloudData.kevinBaseXP ?? cloudData.xp?.Kevin ?? prev.kevinBaseXP ?? 0,
                   );
+                  const rawMarcoXP = Number(
+                    cloudData.marcoBaseXP ?? cloudData.xp?.Marco ?? prev.marcoBaseXP ?? 0,
+                  );
+                  const kevinXP = Number.isFinite(rawKevinXP) ? Math.max(0, Math.round(rawKevinXP)) : 0;
+                  const marcoXP = Number.isFinite(rawMarcoXP) ? Math.max(0, Math.round(rawMarcoXP)) : 0;
                   const kevinLvl = Math.floor(kevinXP / XP_PER_LEVEL) + 1;
                   const marcoLvl = Math.floor(marcoXP / XP_PER_LEVEL) + 1;
                   const kevinStrk = Math.max(
@@ -1207,7 +1284,7 @@ export default function AdminDashboard() {
                         cloudData.streak?.Kevin ??
                         prev.kevinEarlyStreak ??
                         0,
-                    ),
+                    ) || 0,
                   );
                   const marcoStrk = Math.max(
                     0,
@@ -1216,7 +1293,7 @@ export default function AdminDashboard() {
                         cloudData.streak?.Marco ??
                         prev.marcoEarlyStreak ??
                         0,
-                    ),
+                    ) || 0,
                   );
                   const mergedHp = {
                     ...(prev.clientHpMap || {}),
@@ -1224,11 +1301,26 @@ export default function AdminDashboard() {
                     ...(cloudData.clientHpMap || {}),
                     ...(cloudData.clientsHp || {}),
                   };
+                  const cloudRewards =
+                    Array.isArray(cloudData.weeklyRewards) && cloudData.weeklyRewards.length > 0
+                      ? cloudData.weeklyRewards
+                      : Array.isArray(prev.weeklyRewards) && prev.weeklyRewards.length > 0
+                      ? prev.weeklyRewards
+                      : DEFAULT_WEEKLY_REWARDS;
+                  const requestedRewardId =
+                    cloudData.activeRewardId ?? prev.activeRewardId ?? cloudRewards[0]?.id;
+                  const matchedReward =
+                    cloudRewards.find((r) => r.id === requestedRewardId) ||
+                    cloudRewards[0] || {
+                      id: 'rew-fallback',
+                      emoji: '🏆',
+                      title: 'Recompensa de Socios',
+                    };
                   const rewardStr =
                     cloudData.weeklyRewardText ??
                     cloudData.weeklyReward ??
-                    prev.weeklyRewardText ??
-                    'Cena Libre + Tarde Libre de Socios';
+                    `${matchedReward.emoji} ${matchedReward.title}`;
+
                   const merged = {
                     ...prev,
                     ...cloudData,
@@ -1239,11 +1331,16 @@ export default function AdminDashboard() {
                     marcoLevel: marcoLvl,
                     kevinEarlyStreak: kevinStrk,
                     marcoEarlyStreak: marcoStrk,
+                    weeklyRewards: cloudRewards,
+                    activeRewardId: matchedReward.id,
                     weeklyRewardText: rewardStr,
                     weeklyReward: rewardStr,
                     xp: { Kevin: kevinXP, Marco: marcoXP },
                     level: { Kevin: kevinLvl, Marco: marcoLvl },
                     streak: { Kevin: kevinStrk, Marco: marcoStrk },
+                    creditedQuestIds: Array.isArray(cloudData.creditedQuestIds)
+                      ? cloudData.creditedQuestIds
+                      : prev.creditedQuestIds || [],
                     activityLog: Array.isArray(cloudData.activityLog)
                       ? cloudData.activityLog
                       : prev.activityLog || [],
@@ -1267,6 +1364,7 @@ export default function AdminDashboard() {
                     },
                     clientHpMap: mergedHp,
                     clientsHp: mergedHp,
+                    updatedAtMs: Math.max(cloudMs, localMs),
                   };
                   try {
                     localStorage.setItem('zenda_rpg_os_v2', JSON.stringify(merged));
@@ -1315,10 +1413,46 @@ export default function AdminDashboard() {
                   zendaDoc?.rpgStateMirror &&
                   zendaDoc.rpgStateMirror.seasonVersion === CURRENT_SEASON_VERSION
                 ) {
-                  setRpgState((prev) => ({
-                    ...prev,
-                    ...zendaDoc.rpgStateMirror,
-                  }));
+                  const mirrorData = zendaDoc.rpgStateMirror;
+                  setRpgState((prev) => {
+                    const mirrorMs =
+                      Number(mirrorData.updatedAtMs) ||
+                      (mirrorData.updatedAt ? Date.parse(mirrorData.updatedAt) : 0) ||
+                      0;
+                    const localMs = Math.max(
+                      Number(prev.updatedAtMs) || 0,
+                      lastLocalRpgWriteMsRef.current || 0,
+                    );
+                    if (localMs > 0 && mirrorMs <= localMs) {
+                      return prev;
+                    }
+                    const rawKevinXP = Number(
+                      mirrorData.kevinBaseXP ?? mirrorData.xp?.Kevin ?? prev.kevinBaseXP ?? 0,
+                    );
+                    const rawMarcoXP = Number(
+                      mirrorData.marcoBaseXP ?? mirrorData.xp?.Marco ?? prev.marcoBaseXP ?? 0,
+                    );
+                    const kevinXP = Number.isFinite(rawKevinXP)
+                      ? Math.max(0, Math.round(rawKevinXP))
+                      : 0;
+                    const marcoXP = Number.isFinite(rawMarcoXP)
+                      ? Math.max(0, Math.round(rawMarcoXP))
+                      : 0;
+                    return {
+                      ...prev,
+                      ...mirrorData,
+                      kevinBaseXP: kevinXP,
+                      marcoBaseXP: marcoXP,
+                      kevinLevel: Math.floor(kevinXP / XP_PER_LEVEL) + 1,
+                      marcoLevel: Math.floor(marcoXP / XP_PER_LEVEL) + 1,
+                      xp: { Kevin: kevinXP, Marco: marcoXP },
+                      level: {
+                        Kevin: Math.floor(kevinXP / XP_PER_LEVEL) + 1,
+                        Marco: Math.floor(marcoXP / XP_PER_LEVEL) + 1,
+                      },
+                      updatedAtMs: Math.max(mirrorMs, localMs),
+                    };
+                  });
                 }
 
                 // Si faltaba alguna de las 4 cuentas oficiales (ej. Zenda Agency), la sincroniza en Firestore
@@ -1505,13 +1639,27 @@ export default function AdminDashboard() {
   const handleResetSeasonToZero = async () => {
     setIsResettingSeason(true);
     try {
+      const nowWriteMs = Date.now();
+      lastLocalRpgWriteMsRef.current = nowWriteMs;
+      const preCompletedIds = sprints
+        .filter((s) => getQuestRpgStatus(s) === 'Completado')
+        .map((s) => s.id);
+
       const zeroSeasonPayload = getOfficialZeroRpgDefaults({
-        weeklyRewardText: rpgState.weeklyRewardText || 'Cena Libre + Tarde Libre de Socios',
-        weeklyReward: rpgState.weeklyRewardText || 'Cena Libre + Tarde Libre de Socios',
+        weeklyRewards:
+          Array.isArray(rpgState.weeklyRewards) && rpgState.weeklyRewards.length > 0
+            ? rpgState.weeklyRewards
+            : DEFAULT_WEEKLY_REWARDS,
+        activeRewardId: rpgState.activeRewardId || 'rew-cena',
+        weeklyRewardText: rpgState.weeklyRewardText || '🍔 Cena libre',
+        weeklyReward: rpgState.weeklyRewardText || '🍔 Cena libre',
         webhookUrl: rpgState.webhookUrl || '',
         soundEnabled: rpgState.soundEnabled ?? true,
+        customCategories: rpgState.customCategories || [],
+        creditedQuestIds: preCompletedIds,
         quests: sprints,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(nowWriteMs).toISOString(),
+        updatedAtMs: nowWriteMs,
       });
 
       setRpgState(zeroSeasonPayload);
@@ -1526,19 +1674,24 @@ export default function AdminDashboard() {
 
       if (isFirebaseConfigured && db) {
         const { doc, setDoc } = await import('firebase/firestore');
-        await Promise.all([
+        await Promise.allSettled([
           setDoc(doc(db, 'zenda_system', 'rpg_state'), zeroSeasonPayload),
           ...zendaClients.map((client) =>
             setDoc(
               doc(db, 'zenda_clients', client.id),
-              { videosPublicadosEstaSemana: 0 },
+              {
+                videosPublicadosEstaSemana: 0,
+                ...(client.id === 'client-zenda-agency'
+                  ? { rpgStateMirror: zeroSeasonPayload }
+                  : {}),
+              },
               { merge: true },
             ),
           ),
         ]);
       }
 
-      showToast('Temporada reiniciada a 0 XP · LVL 1 · Racha 0d · 0/12 Reels');
+      showToast('Temporada reiniciada a 0 XP · LVL 1 · 0/12 Reels');
     } catch (err) {
       console.warn('[Firestore] Error reiniciando temporada a 0:', err);
       showToast('Error al reiniciar temporada');
@@ -1550,9 +1703,12 @@ export default function AdminDashboard() {
   const handleResetRealDatabase = async () => {
     setIsResettingBase(true);
     try {
+      const nowWriteMs = Date.now();
+      lastLocalRpgWriteMsRef.current = nowWriteMs;
       const resetRpgPayload = getOfficialZeroRpgDefaults({
         webhookUrl: rpgState.webhookUrl || '',
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(nowWriteMs).toISOString(),
+        updatedAtMs: nowWriteMs,
       });
 
       if (isFirebaseConfigured && db) {
@@ -1576,9 +1732,14 @@ export default function AdminDashboard() {
         }
 
         // Sembrar las 4 cuentas oficiales con contadores en 0 y reiniciar zenda_system/rpg_state en 0 XP
-        await Promise.all([
+        await Promise.allSettled([
           ...OFFICIAL_INITIAL_CLIENTS.map((client) =>
-            setDoc(doc(db, 'zenda_clients', client.id), client),
+            setDoc(doc(db, 'zenda_clients', client.id), {
+              ...client,
+              ...(client.id === 'client-zenda-agency'
+                ? { rpgStateMirror: resetRpgPayload }
+                : {}),
+            }),
           ),
           setDoc(doc(db, 'zenda_system', 'rpg_state'), resetRpgPayload),
         ]);
@@ -1945,206 +2106,283 @@ export default function AdminDashboard() {
   };
 
   /**
-   * Avanza una Quest del Día en 1 clic:
-   * Pendiente → En Curso → Completado
-   * Suma el XP asignado (libre o preset), registra en el Log de Actividad en Vivo y en la Bóveda (history),
-   * restaura HP del cliente al 100% si es cuenta de cliente y dispara confeti al cerrar las 3 misiones diarias.
+   * Completa o cambia el estado de una Misión (Quest) con bloqueo anti-doble clic:
+   * - Si se pulsa el botón principal en una misión no completada, pasa directamente a 'Completado' en 1 clic.
+   * - Acredita la XP de inmediato al responsable real ('Kevin', 'Marco' o a ambos si es 'Ambos').
+   * - Evita duplicación de XP por doble clic rápido mediante processingQuestIdsRef + creditedQuestIds.
+   * - Registra en el Log de Actividad en Vivo, Historial y actualiza el Duelo 1v1 en una sola operación atómica.
    */
   const handleAdvanceQuestRpgState = async (task, explicitRpgStatus = null) => {
-    if (!task) return;
-    const currentRpg = getQuestRpgStatus(task);
-    const currentIdx = QUEST_STATES.indexOf(currentRpg);
-    const assignee = normalizeAssignee(task.assignee);
-    const diffInfo = getQuestDifficultyInfo(task);
+    if (!task || !task.id) return;
+    if (processingQuestIdsRef.current.has(task.id)) {
+      return;
+    }
 
+    const currentRpg = getQuestRpgStatus(task);
     let nextRpg = explicitRpgStatus;
     if (!nextRpg) {
-      if (currentRpg === 'Completado') {
-        nextRpg = 'En Curso';
-      } else {
-        nextRpg = QUEST_STATES[Math.min(currentIdx + 1, QUEST_STATES.length - 1)];
-      }
+      nextRpg = currentRpg === 'Completado' ? 'Pendiente' : 'Completado';
     }
 
     if (nextRpg === currentRpg) return;
 
-    const isNowCompleted = nextRpg === 'Completado';
-    const wasCompleted = currentRpg === 'Completado';
-    const nextStage =
-      nextRpg === 'Completado'
-        ? 'Publicado'
-        : nextRpg === 'En Curso'
-        ? 'Grabado'
-        : 'Guion';
-    const nowIso = new Date().toISOString();
+    processingQuestIdsRef.current.add(task.id);
+    try {
+      const assigneeNorm = normalizeAssignee(task.assignee);
+      const targets = getAssigneeTargets(assigneeNorm);
+      const diffInfo = getQuestDifficultyInfo(task);
+      const xpAmount = Math.max(10, Number(diffInfo.xp) || 100);
 
-    const updates = {
-      questStatus: nextRpg,
-      stage: nextStage,
-      completed: isNowCompleted,
-      updatedAt: nowIso,
-      ...(isNowCompleted
-        ? { publishedAt: nowIso, completedDate: todayDateStr }
-        : { publishedAt: null, completedDate: null }),
-    };
-
-    const playerCompletedBefore = sprints.filter(
-      (s) =>
-        s.id !== task.id &&
-        normalizeAssignee(s.assignee) === assignee &&
-        getQuestRpgStatus(s) === 'Completado',
-    ).length;
-
-    const nextQuestsList = sprints.map((s) => (s.id === task.id ? { ...s, ...updates } : s));
-    setSprints(nextQuestsList);
-    setNowMs(Date.now());
-
-    // Actualizar XP del jugador en vivo, registrar en Log de Actividad + Historial permanente en zenda_system/rpg_state
-    if (isNowCompleted && !wasCompleted) {
-      const xpKey = assignee === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
+      const isNowCompleted = nextRpg === 'Completado';
+      const wasCompleted = currentRpg === 'Completado';
+      const nextStage =
+        nextRpg === 'Completado'
+          ? 'Publicado'
+          : nextRpg === 'En Curso'
+          ? 'Grabado'
+          : 'Guion';
+      const nowIso = new Date().toISOString();
       const exactTimeStr = formatExactTime(new Date());
-      const newLogEntry = {
-        id: `act-${Date.now()}`,
-        player: assignee,
-        action: task.title,
-        category: task.client || 'Zenda Agency',
-        difficulty: diffInfo.label,
-        xp: diffInfo.xp,
-        time: exactTimeStr,
-        createdAt: nowIso,
-      };
-      const newHistoryEntry = {
-        id: `hist-${Date.now()}`,
-        questId: task.id,
-        type: diffInfo.id === 'Reel Publicado' ? 'reel' : 'quest',
-        player: assignee,
-        account: task.client || 'Zenda Agency',
-        title: task.title,
-        link: task.link || '',
-        xp: diffInfo.xp,
-        date: todayDateStr,
-        time: exactTimeStr,
-        createdAt: nowIso,
-      };
-      updateRpgState((prev) => ({
-        ...prev,
-        [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0)) + diffInfo.xp,
-        quests: nextQuestsList,
-        activityLog: [newLogEntry, ...(prev.activityLog || [])].slice(0, 15),
-        history: [newHistoryEntry, ...(prev.history || [])].slice(0, 200),
-      }));
-      showFloatingXp(assignee, diffInfo.xp, `+${diffInfo.xp} XP · ${task.client || diffInfo.label}`);
 
-      const newDoneCount = playerCompletedBefore + 1;
-      if (newDoneCount >= 3) {
-        playRpgSound('fanfare', rpgState.soundEnabled);
-        triggerCelebration();
-        showToast(`¡${assignee} completó sus 3 Quests del Día! (+${diffInfo.xp} XP)`);
-      } else {
-        playRpgSound('xp', rpgState.soundEnabled);
-        showToast(`Quest Completada por ${assignee}: +${diffInfo.xp} XP`);
-      }
-    } else if (!isNowCompleted && wasCompleted) {
-      const xpKey = assignee === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
-      updateRpgState((prev) => ({
-        ...prev,
-        [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0) - diffInfo.xp),
-        quests: nextQuestsList,
-      }));
-      showToast(`Quest reabierta: En Curso (${task.client})`);
-    } else if (nextRpg === 'En Curso') {
-      updateRpgState((prev) => ({ ...prev, quests: nextQuestsList }));
-      playRpgSound('advance', rpgState.soundEnabled);
-      showToast(`Quest En Curso: ${task.title} (${task.client})`);
-    } else {
-      updateRpgState((prev) => ({ ...prev, quests: nextQuestsList }));
-    }
+      const updates = {
+        questStatus: nextRpg,
+        stage: nextStage,
+        completed: isNowCompleted,
+        updatedAt: nowIso,
+        ...(isNowCompleted
+          ? { publishedAt: nowIso, completedDate: todayDateStr }
+          : { publishedAt: null, completedDate: null }),
+      };
 
-    // Si es una misión de cliente (no personal) y se completa, restaurar HP y actualizar reels si es Reel Publicado
-    if (!isPersonalCategory(task.client)) {
-      const accountKey = normalizeAccountKey(task.client);
-      const matchingClient = zendaClients.find(
-        (c) => normalizeAccountKey(c.name) === accountKey,
+      const nextQuestsList = sprints.map((s) =>
+        s.id === task.id ? { ...s, ...updates } : s,
       );
+      setSprints(nextQuestsList);
+      setNowMs(Date.now());
 
-      if (matchingClient && (isNowCompleted || wasCompleted)) {
-        const isReelPub = diffInfo.id === 'Reel Publicado';
-        const currentVidCount = Number(matchingClient.videosPublicadosEstaSemana || 0);
-        const nextVidCount = isNowCompleted
-          ? currentVidCount + 1
-          : Math.max(0, currentVidCount - 1);
+      const isPersonal = isPersonalCategory(task.client);
+      const accountKey = normalizeAccountKey(task.client);
+      const matchingClient = !isPersonal
+        ? zendaClients.find((c) => normalizeAccountKey(c.name) === accountKey)
+        : null;
+      const isReelPub = diffInfo.id === 'Reel Publicado';
 
-        if (isNowCompleted) {
+      if (isNowCompleted && !wasCompleted) {
+        if (matchingClient) {
           setHealedClientFlashId(matchingClient.id);
           setTimeout(() => setHealedClientFlashId(null), 2400);
-          updateRpgState((prev) => ({
-            ...prev,
-            manualHoursOverride: {
-              ...(prev.manualHoursOverride || {}),
-              [matchingClient.id]: 0,
-            },
-            clientLastPublishedMap: {
-              ...(prev.clientLastPublishedMap || {}),
-              [matchingClient.id]: nowIso,
-            },
-            clientHpMap: {
-              ...(prev.clientHpMap || {}),
-              [matchingClient.id]: 100,
-            },
-            ...(isReelPub
-              ? {
-                  bossChestReelsCount: Math.min(
-                    12,
-                    Number(prev.bossChestReelsCount || 0) + 1,
-                  ),
-                }
-              : {}),
-          }));
         }
 
-        if (isReelPub) {
+        const newLogEntries = targets.map((player, idx) => ({
+          id: `act-${Date.now()}-${idx}`,
+          questId: task.id,
+          player,
+          action: task.title,
+          category: task.client || 'Zenda Agency',
+          difficulty: diffInfo.label,
+          xp: xpAmount,
+          time: exactTimeStr,
+          createdAt: nowIso,
+        }));
+
+        const newHistoryEntries = targets.map((player, idx) => ({
+          id: `hist-${Date.now()}-${idx}`,
+          questId: task.id,
+          type: isReelPub ? 'reel' : 'quest',
+          player,
+          account: task.client || 'Zenda Agency',
+          title: task.title,
+          link: task.link || '',
+          xp: xpAmount,
+          date: todayDateStr,
+          time: exactTimeStr,
+          createdAt: nowIso,
+        }));
+
+        updateRpgState((prev) => {
+          const prevCredited = Array.isArray(prev.creditedQuestIds)
+            ? prev.creditedQuestIds
+            : [];
+          const alreadyCredited = prevCredited.includes(task.id);
+
+          const prevKevinXP = Math.max(
+            0,
+            Number(prev.kevinBaseXP ?? prev.xp?.Kevin ?? 0) || 0,
+          );
+          const prevMarcoXP = Math.max(
+            0,
+            Number(prev.marcoBaseXP ?? prev.xp?.Marco ?? 0) || 0,
+          );
+
+          const nextKevinXP =
+            !alreadyCredited && targets.includes('Kevin')
+              ? prevKevinXP + xpAmount
+              : prevKevinXP;
+          const nextMarcoXP =
+            !alreadyCredited && targets.includes('Marco')
+              ? prevMarcoXP + xpAmount
+              : prevMarcoXP;
+
+          const nextCredited = alreadyCredited
+            ? prevCredited
+            : [...prevCredited, task.id];
+
+          return {
+            ...prev,
+            kevinBaseXP: nextKevinXP,
+            marcoBaseXP: nextMarcoXP,
+            xp: { Kevin: nextKevinXP, Marco: nextMarcoXP },
+            creditedQuestIds: nextCredited,
+            quests: nextQuestsList,
+            activityLog: alreadyCredited
+              ? prev.activityLog || []
+              : [...newLogEntries, ...(prev.activityLog || [])].slice(0, 15),
+            history: alreadyCredited
+              ? prev.history || []
+              : [...newHistoryEntries, ...(prev.history || [])].slice(0, 200),
+            ...(matchingClient
+              ? {
+                  manualHoursOverride: {
+                    ...(prev.manualHoursOverride || {}),
+                    [matchingClient.id]: 0,
+                  },
+                  clientLastPublishedMap: {
+                    ...(prev.clientLastPublishedMap || {}),
+                    [matchingClient.id]: nowIso,
+                  },
+                  clientHpMap: {
+                    ...(prev.clientHpMap || {}),
+                    [matchingClient.id]: 100,
+                  },
+                  clientsHp: {
+                    ...(prev.clientsHp || {}),
+                    [matchingClient.id]: 100,
+                  },
+                  ...(isReelPub && !alreadyCredited
+                    ? {
+                        bossChestReelsCount: Math.min(
+                          12,
+                          Number(prev.bossChestReelsCount || 0) + 1,
+                        ),
+                      }
+                    : {}),
+                }
+              : {}),
+          };
+        });
+
+        const labelWho = assigneeNorm === 'Ambos' ? 'Kevin & Marco' : assigneeNorm;
+        showFloatingXp(
+          labelWho,
+          xpAmount,
+          `+${xpAmount} XP · ${task.client || 'Misión'}`,
+        );
+
+        const doneForTarget = nextQuestsList.filter(
+          (s) =>
+            isAssignedToPlayer(s.assignee, targets[0]) &&
+            getQuestRpgStatus(s) === 'Completado',
+        ).length;
+
+        if (doneForTarget >= 3) {
+          playRpgSound('fanfare', rpgState.soundEnabled);
+          triggerCelebration();
+          showToast(`¡${labelWho} completó 3 misiones! (+${xpAmount} XP)`);
+        } else {
+          playRpgSound('xp', rpgState.soundEnabled);
+          showToast(`Misión completada por ${labelWho}: +${xpAmount} XP`);
+        }
+
+        if (matchingClient && isReelPub) {
+          const nextVidCount =
+            Number(matchingClient.videosPublicadosEstaSemana || 0) + 1;
           await handleUpdateClientField(
             matchingClient.id,
             {
               videosPublicadosEstaSemana: nextVidCount,
-              ...(isNowCompleted ? { lastPublishedAt: nowIso, health: 'En ritmo' } : {}),
+              lastPublishedAt: nowIso,
+              health: 'En ritmo',
             },
             '',
           );
         }
-      }
-    }
+      } else if (!isNowCompleted && wasCompleted) {
+        updateRpgState((prev) => {
+          const prevCredited = Array.isArray(prev.creditedQuestIds)
+            ? prev.creditedQuestIds
+            : [];
+          const wasInCredited = prevCredited.includes(task.id);
+          const prevKevinXP = Math.max(
+            0,
+            Number(prev.kevinBaseXP ?? prev.xp?.Kevin ?? 0) || 0,
+          );
+          const prevMarcoXP = Math.max(
+            0,
+            Number(prev.marcoBaseXP ?? prev.xp?.Marco ?? 0) || 0,
+          );
 
-    if (isFirebaseConfigured && db && !task.id.startsWith('local-sp-')) {
-      try {
-        const { doc, updateDoc } = await import('firebase/firestore');
-        await updateDoc(doc(db, 'zenda_sprints', task.id), updates);
-      } catch (err) {
-        console.warn('[Firestore] Error avanzando estado RPG de quest:', err);
-      }
-    }
-  };
+          const nextKevinXP =
+            wasInCredited && targets.includes('Kevin')
+              ? Math.max(0, prevKevinXP - xpAmount)
+              : prevKevinXP;
+          const nextMarcoXP =
+            wasInCredited && targets.includes('Marco')
+              ? Math.max(0, prevMarcoXP - xpAmount)
+              : prevMarcoXP;
 
-  /**
-   * Cambia el XP libre (customXp) de una Quest activa
-   */
-  const handleChangeQuestCustomXp = async (task, newXpValue) => {
-    if (!task) return;
-    const parsedXp = Math.max(10, Number(newXpValue) || 100);
-    const nextList = sprints.map((s) =>
-      s.id === task.id ? { ...s, customXp: parsedXp } : s,
-    );
-    setSprints(nextList);
-    updateRpgState((prev) => ({ ...prev, quests: nextList }));
-    showToast(`Recompensa de Quest actualizada: +${parsedXp} XP`);
-
-    if (isFirebaseConfigured && db && !task.id.startsWith('local-sp-')) {
-      try {
-        const { doc, updateDoc } = await import('firebase/firestore');
-        await updateDoc(doc(db, 'zenda_sprints', task.id), { customXp: parsedXp });
-      } catch (err) {
-        console.warn('[Firestore] Error actualizando customXp de quest:', err);
+          return {
+            ...prev,
+            kevinBaseXP: nextKevinXP,
+            marcoBaseXP: nextMarcoXP,
+            xp: { Kevin: nextKevinXP, Marco: nextMarcoXP },
+            creditedQuestIds: prevCredited.filter((id) => id !== task.id),
+            quests: nextQuestsList,
+            activityLog: (prev.activityLog || []).filter(
+              (a) => a.questId !== task.id,
+            ),
+            history: (prev.history || []).filter((h) => h.questId !== task.id),
+            ...(isReelPub && wasInCredited
+              ? {
+                  bossChestReelsCount: Math.max(
+                    0,
+                    Number(prev.bossChestReelsCount || 0) - 1,
+                  ),
+                }
+              : {}),
+          };
+        });
+        if (matchingClient && isReelPub) {
+          const nextVidCount = Math.max(
+            0,
+            Number(matchingClient.videosPublicadosEstaSemana || 0) - 1,
+          );
+          await handleUpdateClientField(
+            matchingClient.id,
+            { videosPublicadosEstaSemana: nextVidCount },
+            '',
+          );
+        }
+        showToast(`Misión reabierta (${task.title})`);
+      } else {
+        updateRpgState((prev) => ({ ...prev, quests: nextQuestsList }));
+        playRpgSound('advance', rpgState.soundEnabled);
+        showToast(`Misión ${nextRpg}: ${task.title}`);
       }
+
+      if (isFirebaseConfigured && db) {
+        try {
+          const { doc, setDoc } = await import('firebase/firestore');
+          await setDoc(doc(db, 'zenda_sprints', task.id), updates, {
+            merge: true,
+          });
+        } catch (err) {
+          console.warn('[Firestore] Error avanzando estado RPG de quest:', err);
+        }
+      }
+    } finally {
+      setTimeout(() => {
+        processingQuestIdsRef.current.delete(task.id);
+      }, 450);
     }
   };
 
@@ -2174,7 +2412,113 @@ export default function AdminDashboard() {
 
     setCustomCategoryDraft('');
     setAddingCustomCategoryFor(null);
-    showToast(`Categoría "${cleanName}" creada en Zenda OS`);
+    showToast(`Categoría "${cleanName}" creada`);
+  };
+
+  // ============================================================================
+  // CRUD DE RECOMPENSAS SEMANALES ELEGIBLES (META SEMANAL 12/12)
+  // ============================================================================
+
+  const handleSelectActiveReward = (reward) => {
+    if (!reward) return;
+    const formatted = `${reward.emoji || '🏆'} ${reward.title}`;
+    updateRpgState({
+      activeRewardId: reward.id,
+      weeklyRewardText: formatted,
+      weeklyReward: formatted,
+    });
+    showToast(`Recompensa activa: ${formatted}`);
+  };
+
+  const handleSaveWeeklyReward = (e) => {
+    e.preventDefault();
+    const cleanTitle = rewardForm.title.trim();
+    if (!cleanTitle) return;
+    const cleanEmoji = (rewardForm.emoji || '🏆').trim() || '🏆';
+
+    const currentList =
+      Array.isArray(rpgState.weeklyRewards) && rpgState.weeklyRewards.length > 0
+        ? rpgState.weeklyRewards
+        : DEFAULT_WEEKLY_REWARDS;
+
+    if (editingRewardId) {
+      const nextList = currentList.map((r) =>
+        r.id === editingRewardId
+          ? { ...r, emoji: cleanEmoji, title: cleanTitle }
+          : r,
+      );
+      const isCurrentlyActive = rpgState.activeRewardId === editingRewardId;
+      const formatted = `${cleanEmoji} ${cleanTitle}`;
+      updateRpgState({
+        weeklyRewards: nextList,
+        ...(isCurrentlyActive
+          ? { weeklyRewardText: formatted, weeklyReward: formatted }
+          : {}),
+      });
+      showToast(`Recompensa actualizada: ${formatted}`);
+    } else {
+      const newReward = {
+        id: `rew-${Date.now()}`,
+        emoji: cleanEmoji,
+        title: cleanTitle,
+      };
+      const nextList = [...currentList, newReward];
+      const formatted = `${cleanEmoji} ${cleanTitle}`;
+      updateRpgState({
+        weeklyRewards: nextList,
+        activeRewardId: newReward.id,
+        weeklyRewardText: formatted,
+        weeklyReward: formatted,
+      });
+      showToast(`Recompensa creada y seleccionada: ${formatted}`);
+    }
+
+    setEditingRewardId(null);
+    setRewardForm({ emoji: '💪', title: '' });
+  };
+
+  const handleEditWeeklyReward = (reward) => {
+    if (!reward) return;
+    setEditingRewardId(reward.id);
+    setRewardForm({
+      emoji: reward.emoji || '🏆',
+      title: reward.title || '',
+    });
+  };
+
+  const handleDeleteWeeklyReward = (rewardId) => {
+    const currentList =
+      Array.isArray(rpgState.weeklyRewards) && rpgState.weeklyRewards.length > 0
+        ? rpgState.weeklyRewards
+        : DEFAULT_WEEKLY_REWARDS;
+    const remaining = currentList.filter((r) => r.id !== rewardId);
+    const safeList =
+      remaining.length > 0
+        ? remaining
+        : [{ id: 'rew-fallback', emoji: '🏆', title: 'Meta Semanal de Socios' }];
+
+    const wasActive = rpgState.activeRewardId === rewardId;
+    const fallbackReward = wasActive
+      ? safeList[0]
+      : safeList.find((r) => r.id === rpgState.activeRewardId) || safeList[0];
+    const formatted = `${fallbackReward.emoji} ${fallbackReward.title}`;
+
+    if (editingRewardId === rewardId) {
+      setEditingRewardId(null);
+      setRewardForm({ emoji: '💪', title: '' });
+    }
+
+    updateRpgState({
+      weeklyRewards: safeList,
+      activeRewardId: fallbackReward.id,
+      weeklyRewardText: formatted,
+      weeklyReward: formatted,
+    });
+    showToast(
+      wasActive
+        ? `Recompensa eliminada · Activa ahora: ${formatted}`
+        : 'Recompensa eliminada',
+    );
   };
 
   /**
@@ -2182,105 +2526,125 @@ export default function AdminDashboard() {
    */
   const handleOpenPublishModal = (client) => {
     if (!client) return;
+    const defaultPlayer =
+      normalizeAssignee(client.leadOwner) === 'Marco' ? 'Marco' : 'Kevin';
     setPublishModalClient(client);
     setPublishForm({
-      player: normalizeAssignee(client.leadOwner || 'Kevin'),
+      player: defaultPlayer,
       title: '',
       link: '',
     });
   };
 
   /**
-   * Confirmar Publicación Anti-Trampa:
+   * Confirmar Publicación Anti-Trampa (con bloqueo anti-doble envío):
    * Restaura HP al 100%, suma +200 XP al jugador elegido, sube la Meta Semanal (X/12)
-   * y guarda el registro permanente en Firestore (zenda_system/rpg_state.history).
+   * y guarda el registro permanente en Firestore.
    */
   const handleConfirmAntiCheatPublish = async (e) => {
     e.preventDefault();
     if (!publishModalClient || !publishForm.title.trim()) return;
+    if (isPublishingReelRef.current) return;
+    isPublishingReelRef.current = true;
 
-    const client = publishModalClient;
-    const chosenPlayer = normalizeAssignee(publishForm.player);
-    const reelTitle = publishForm.title.trim();
-    const reelLink = publishForm.link.trim();
-    const nowIso = new Date().toISOString();
-    const exactTimeStr = formatExactTime(new Date());
-    const nextVidCount = Number(client.videosPublicadosEstaSemana || 0) + 1;
-    const xpKey = chosenPlayer === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
+    try {
+      const client = publishModalClient;
+      const chosenPlayer =
+        normalizeAssignee(publishForm.player) === 'Marco' ? 'Marco' : 'Kevin';
+      const reelTitle = publishForm.title.trim();
+      const reelLink = publishForm.link.trim();
+      const nowIso = new Date().toISOString();
+      const exactTimeStr = formatExactTime(new Date());
+      const nextVidCount = Number(client.videosPublicadosEstaSemana || 0) + 1;
+      const xpKey = chosenPlayer === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
 
-    setHealedClientFlashId(client.id);
-    setTimeout(() => setHealedClientFlashId(null), 2600);
-    playRpgSound('heal', rpgState.soundEnabled);
+      setHealedClientFlashId(client.id);
+      setTimeout(() => setHealedClientFlashId(null), 2600);
+      playRpgSound('heal', rpgState.soundEnabled);
 
-    const newLogEntry = {
-      id: `act-${Date.now()}`,
-      player: chosenPlayer,
-      action: `Reel: ${reelTitle}`,
-      category: client.name,
-      difficulty: 'Reel Publicado',
-      link: reelLink,
-      xp: 200,
-      time: exactTimeStr,
-      createdAt: nowIso,
-    };
+      const newLogEntry = {
+        id: `act-${Date.now()}`,
+        player: chosenPlayer,
+        action: `Reel: ${reelTitle}`,
+        category: client.name,
+        difficulty: 'Reel Publicado',
+        link: reelLink,
+        xp: 200,
+        time: exactTimeStr,
+        createdAt: nowIso,
+      };
 
-    const newHistoryEntry = {
-      id: `hist-${Date.now()}`,
-      type: 'reel',
-      player: chosenPlayer,
-      account: client.name,
-      title: reelTitle,
-      link: reelLink,
-      xp: 200,
-      date: todayDateStr,
-      time: exactTimeStr,
-      createdAt: nowIso,
-    };
+      const newHistoryEntry = {
+        id: `hist-${Date.now()}`,
+        type: 'reel',
+        player: chosenPlayer,
+        account: client.name,
+        title: reelTitle,
+        link: reelLink,
+        xp: 200,
+        date: todayDateStr,
+        time: exactTimeStr,
+        createdAt: nowIso,
+      };
 
-    updateRpgState((prev) => ({
-      ...prev,
-      [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0)) + 200,
-      manualHoursOverride: {
-        ...(prev.manualHoursOverride || {}),
-        [client.id]: 0,
-      },
-      clientLastPublishedMap: {
-        ...(prev.clientLastPublishedMap || {}),
-        [client.id]: nowIso,
-      },
-      clientHpMap: {
-        ...(prev.clientHpMap || {}),
-        [client.id]: 100,
-      },
-      bossChestReelsCount: Math.min(12, Number(prev.bossChestReelsCount || 0) + 1),
-      activityLog: [newLogEntry, ...(prev.activityLog || [])].slice(0, 15),
-      history: [newHistoryEntry, ...(prev.history || [])].slice(0, 200),
-    }));
+      updateRpgState((prev) => ({
+        ...prev,
+        [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0) || 0) + 200,
+        manualHoursOverride: {
+          ...(prev.manualHoursOverride || {}),
+          [client.id]: 0,
+        },
+        clientLastPublishedMap: {
+          ...(prev.clientLastPublishedMap || {}),
+          [client.id]: nowIso,
+        },
+        clientHpMap: {
+          ...(prev.clientHpMap || {}),
+          [client.id]: 100,
+        },
+        clientsHp: {
+          ...(prev.clientsHp || {}),
+          [client.id]: 100,
+        },
+        bossChestReelsCount: Math.min(
+          12,
+          Number(prev.bossChestReelsCount || 0) + 1,
+        ),
+        activityLog: [newLogEntry, ...(prev.activityLog || [])].slice(0, 15),
+        history: [newHistoryEntry, ...(prev.history || [])].slice(0, 200),
+      }));
 
-    showFloatingXp(chosenPlayer, 200, `+200 XP · Reel Publicado (${client.name})`);
+      showFloatingXp(chosenPlayer, 200, `+200 XP · Reel (${client.name})`);
 
-    await handleUpdateClientField(
-      client.id,
-      {
-        lastPublishedAt: nowIso,
-        videosPublicadosEstaSemana: nextVidCount,
-        health: 'En ritmo',
-      },
-      `${client.name} al 100% HP · +200 XP para ${chosenPlayer}`,
-    );
+      await handleUpdateClientField(
+        client.id,
+        {
+          lastPublishedAt: nowIso,
+          videosPublicadosEstaSemana: nextVidCount,
+          health: 'En ritmo',
+        },
+        `${client.name} al 100% HP · +200 XP para ${chosenPlayer}`,
+      );
 
-    setPublishModalClient(null);
-    setPublishForm({ player: 'Kevin', title: '', link: '' });
-    setNowMs(Date.now());
+      setPublishModalClient(null);
+      setPublishForm({ player: 'Kevin', title: '', link: '' });
+      setNowMs(Date.now());
+    } finally {
+      setTimeout(() => {
+        isPublishingReelRef.current = false;
+      }, 450);
+    }
   };
 
   /**
-   * Psicología Competitiva 1v1: Aplicar Penalización (-100 XP) por incumplimiento o quedarse dormido
+   * Psicología Competitiva 1v1: Aplicar Penalización (-100 XP) sin caer en números negativos ni NaN
    */
   const handleApplyPenalty = (e) => {
     e.preventDefault();
-    const targetPlayer = normalizeAssignee(penaltyForm.player);
-    const reasonText = penaltyForm.reason.trim() || 'Incumplimiento / Quedarse dormido';
+    const targetPlayer =
+      normalizeAssignee(penaltyForm.player) === 'Marco' ? 'Marco' : 'Kevin';
+    const reasonText =
+      penaltyForm.reason.trim() || 'Incumplimiento / Quedarse dormido';
     const xpKey = targetPlayer === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
     const nowIso = new Date().toISOString();
     const exactTimeStr = formatExactTime(new Date());
@@ -2309,15 +2673,38 @@ export default function AdminDashboard() {
       createdAt: nowIso,
     };
 
-    updateRpgState((prev) => ({
-      ...prev,
-      [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0) - 100),
-      activityLog: [penaltyLogEntry, ...(prev.activityLog || [])].slice(0, 15),
-      history: [penaltyHistoryEntry, ...(prev.history || [])].slice(0, 200),
-    }));
+    updateRpgState((prev) => {
+      const prevCreditedSet = new Set(
+        Array.isArray(prev.creditedQuestIds) ? prev.creditedQuestIds : [],
+      );
+      let uncreditedForTarget = 0;
+      const newlyCreditedIds = [...prevCreditedSet];
+      for (const sp of sprints) {
+        if (getQuestRpgStatus(sp) === 'Completado' && !prevCreditedSet.has(sp.id)) {
+          const xpVal = Math.max(10, Number(getQuestDifficultyInfo(sp).xp) || 100);
+          if (isAssignedToPlayer(sp.assignee, targetPlayer)) {
+            uncreditedForTarget += xpVal;
+            newlyCreditedIds.push(sp.id);
+          }
+        }
+      }
+
+      const currentVal = Number(prev[xpKey] ?? 0);
+      const safeCurrent =
+        (Number.isFinite(currentVal) ? Math.max(0, currentVal) : 0) +
+        uncreditedForTarget;
+      const nextVal = Math.max(0, safeCurrent - 100);
+      return {
+        ...prev,
+        [xpKey]: nextVal,
+        creditedQuestIds: newlyCreditedIds,
+        activityLog: [penaltyLogEntry, ...(prev.activityLog || [])].slice(0, 15),
+        history: [penaltyHistoryEntry, ...(prev.history || [])].slice(0, 200),
+      };
+    });
 
     playRpgSound('advance', rpgState.soundEnabled);
-    showToast(`Penalización aplicada a ${targetPlayer}: -100 XP (${reasonText})`);
+    showToast(`Penalización a ${targetPlayer}: -100 XP`);
     setPenaltyModalOpen(false);
   };
 
@@ -2346,7 +2733,6 @@ export default function AdminDashboard() {
     const nextIg = Number(metricsDraft.instagramFollowers) || 0;
     const nextFb = Number(metricsDraft.facebookFollowers) || 0;
 
-    // Si el usuario modificó los seguidores actuales y no cambió manualmente la variación, calcula +X automáticamente
     const computedTiktokDelta =
       Number(metricsDraft.tiktokWeeklyDelta) !== Number(prevMetrics.tiktokWeeklyDelta)
         ? Number(metricsDraft.tiktokWeeklyDelta) || 0
@@ -2392,7 +2778,7 @@ export default function AdminDashboard() {
     await handleUpdateClientField(
       targetClient.id,
       { socialMetrics: updatedSocialMetrics },
-      `Métricas reales de ${targetClient.name} guardadas en Firestore`,
+      `Métricas de ${targetClient.name} guardadas`,
     );
     if (metricsModalClientId === targetClient.id) {
       setMetricsModalClientId(null);
@@ -2406,7 +2792,7 @@ export default function AdminDashboard() {
     const currentHour = new Date(nowMs).getHours();
     const isWindowOpen = currentHour === 7;
     if (!isWindowOpen) {
-      showToast('7:30 AM Despegue habilitado entre 7:00 AM y 8:00 AM');
+      showToast('Habilitado entre 7:00 AM y 8:00 AM');
       return;
     }
 
@@ -2415,7 +2801,7 @@ export default function AdminDashboard() {
     const xpKey = player === 'Kevin' ? 'kevinBaseXP' : 'marcoBaseXP';
 
     if (rpgState[lastKey] === todayDateStr) {
-      showToast(`${player} ya registró su 7:30 AM Despegue hoy`);
+      showToast(`${player} ya hizo check-in hoy`);
       return;
     }
 
@@ -2425,7 +2811,7 @@ export default function AdminDashboard() {
     const newLogEntry = {
       id: `act-${Date.now()}`,
       player,
-      action: 'Check-in 7:30 AM Despegue',
+      action: 'Check-in 7:30 AM',
       category: 'Personal / Hábito',
       difficulty: 'Hábito Diario',
       xp: 50,
@@ -2438,7 +2824,7 @@ export default function AdminDashboard() {
       type: 'quest',
       player,
       account: 'Personal / Hábito',
-      title: 'Check-in 7:30 AM Despegue',
+      title: 'Check-in 7:30 AM',
       link: '',
       xp: 50,
       date: todayDateStr,
@@ -2449,19 +2835,19 @@ export default function AdminDashboard() {
     updateRpgState((prev) => ({
       ...prev,
       [lastKey]: todayDateStr,
-      [streakKey]: Math.max(0, Number(prev[streakKey] ?? 0)) + 1,
-      [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0)) + 50,
+      [streakKey]: Math.max(0, Number(prev[streakKey] ?? 0) || 0) + 1,
+      [xpKey]: Math.max(0, Number(prev[xpKey] ?? 0) || 0) + 50,
       activityLog: [newLogEntry, ...(prev.activityLog || [])].slice(0, 15),
       history: [newHistoryEntry, ...(prev.history || [])].slice(0, 200),
     }));
 
     playRpgSound('xp', rpgState.soundEnabled);
-    showFloatingXp(player, 50, '+50 XP · 7:30 AM Despegue');
-    showToast(`7:30 AM Despegue de ${player}: +50 XP y +1 día de racha`);
+    showFloatingXp(player, 50, '+50 XP · 7:30 AM');
+    showToast(`Check-in de ${player}: +50 XP`);
   };
 
   /**
-   * Creación rápida inline de Quest (con XP libre customXp y categoría) para Kevin, Marco o Backlog
+   * Creación rápida inline de Misión (con ID determinístico e inserción optimista instantánea)
    */
   const handleQuickCreateMissionInline = async ({
     title,
@@ -2475,12 +2861,18 @@ export default function AdminDashboard() {
   }) => {
     if (!title || !title.trim()) return;
     const nowIso = new Date().toISOString();
-    const resolvedXp = Math.max(10, Number(customXp) || 100);
+    const rawXp = Number(customXp);
+    const resolvedXp = Number.isFinite(rawXp)
+      ? Math.max(10, Math.min(5000, Math.round(rawXp)))
+      : 100;
+    const questId = `sp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const normAssignee = normalizeAssignee(assignee);
 
     const record = {
+      id: questId,
       title: title.trim(),
       client: client || 'Zenda Agency',
-      assignee: normalizeAssignee(assignee),
+      assignee: normAssignee,
       questDifficulty: questDifficulty || 'Reto',
       customXp: resolvedXp,
       questStatus: 'Pendiente',
@@ -2493,26 +2885,26 @@ export default function AdminDashboard() {
       updatedAt: nowIso,
     };
 
+    setSprints((prev) => [record, ...prev]);
+
     if (isFirebaseConfigured && db) {
       try {
-        const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
-        await addDoc(collection(db, 'zenda_sprints'), {
+        const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+        await setDoc(doc(db, 'zenda_sprints', questId), {
           ...record,
           serverCreatedAt: serverTimestamp(),
         });
       } catch (err) {
         console.warn('[Firestore] Error quick create mission:', err);
       }
-    } else {
-      setSprints((prev) => [{ id: `local-sp-${Date.now()}`, ...record }, ...prev]);
     }
 
     playRpgSound('advance', rpgState.soundEnabled);
-    showToast(`Nueva Quest (+${resolvedXp} XP) asignada a ${record.assignee} (${record.client})`);
+    showToast(`Misión creada para ${normAssignee} (+${resolvedXp} XP)`);
   };
 
   /**
-   * Promueve en 1 clic un pendiente del Backlog a las 3 Quests del Día
+   * Promueve en 1 clic un pendiente del Backlog a las 3 Misiones de Hoy
    */
   const handlePromoteBacklogToToday = async (task) => {
     if (!task) return;
@@ -2527,12 +2919,12 @@ export default function AdminDashboard() {
       prev.map((s) => (s.id === task.id ? { ...s, ...updates } : s)),
     );
     playRpgSound('advance', rpgState.soundEnabled);
-    showToast(`Subida a Quests del Día (${normalizeAssignee(task.assignee)})`);
+    showToast(`Subida a Hoy (${normalizeAssignee(task.assignee)})`);
 
-    if (isFirebaseConfigured && db && !task.id.startsWith('local-sp-')) {
+    if (isFirebaseConfigured && db) {
       try {
-        const { doc, updateDoc } = await import('firebase/firestore');
-        await updateDoc(doc(db, 'zenda_sprints', task.id), updates);
+        const { doc, setDoc } = await import('firebase/firestore');
+        await setDoc(doc(db, 'zenda_sprints', task.id), updates, { merge: true });
       } catch (err) {
         console.warn('[Firestore] Error promoviendo misión a hoy:', err);
       }
@@ -2540,70 +2932,208 @@ export default function AdminDashboard() {
   };
 
   /**
-   * Cambia en 1 clic el jugador responsable de una Quest entre Kevin y Marco
+   * Cambia en 1 clic el jugador responsable de una Quest (Kevin → Marco → Ambos → Kevin)
+   * y transfiere atómicamente la XP si la misión ya estaba completada.
    */
   const handleSwitchMissionAssignee = async (task) => {
     if (!task) return;
     const current = normalizeAssignee(task.assignee);
-    const nextAssignee = current === 'Kevin' ? 'Marco' : 'Kevin';
-    setSprints((prev) =>
-      prev.map((s) => (s.id === task.id ? { ...s, assignee: nextAssignee } : s)),
+    const nextAssignee =
+      current === 'Kevin' ? 'Marco' : current === 'Marco' ? 'Ambos' : 'Kevin';
+    const nextList = sprints.map((s) =>
+      s.id === task.id ? { ...s, assignee: nextAssignee } : s,
     );
-    showToast(`Quest transferida a @${nextAssignee}`);
+    setSprints(nextList);
 
-    if (isFirebaseConfigured && db && !task.id.startsWith('local-sp-')) {
+    if (getQuestRpgStatus(task) === 'Completado') {
+      const xpVal = getQuestDifficultyInfo(task).xp;
+      const oldTargets = getAssigneeTargets(current);
+      const newTargets = getAssigneeTargets(nextAssignee);
+      updateRpgState((prev) => {
+        const prevCredited = Array.isArray(prev.creditedQuestIds)
+          ? prev.creditedQuestIds
+          : [];
+        const wasCredited = prevCredited.includes(task.id);
+        let kXP = Math.max(0, Number(prev.kevinBaseXP ?? prev.xp?.Kevin ?? 0) || 0);
+        let mXP = Math.max(0, Number(prev.marcoBaseXP ?? prev.xp?.Marco ?? 0) || 0);
+        if (wasCredited) {
+          if (oldTargets.includes('Kevin')) kXP = Math.max(0, kXP - xpVal);
+          if (oldTargets.includes('Marco')) mXP = Math.max(0, mXP - xpVal);
+        }
+        if (newTargets.includes('Kevin')) kXP += xpVal;
+        if (newTargets.includes('Marco')) mXP += xpVal;
+        const nextCredited = wasCredited ? prevCredited : [...prevCredited, task.id];
+        return {
+          ...prev,
+          kevinBaseXP: kXP,
+          marcoBaseXP: mXP,
+          xp: { Kevin: kXP, Marco: mXP },
+          creditedQuestIds: nextCredited,
+          quests: nextList,
+        };
+      });
+    } else {
+      updateRpgState((prev) => ({ ...prev, quests: nextList }));
+    }
+
+    showToast(`Asignada a @${nextAssignee}`);
+
+    if (isFirebaseConfigured && db) {
       try {
-        const { doc, updateDoc } = await import('firebase/firestore');
-        await updateDoc(doc(db, 'zenda_sprints', task.id), { assignee: nextAssignee });
+        const { doc, setDoc } = await import('firebase/firestore');
+        await setDoc(
+          doc(db, 'zenda_sprints', task.id),
+          { assignee: nextAssignee },
+          { merge: true },
+        );
       } catch (err) {
         console.warn('[Firestore] Error cambiando responsable:', err);
       }
     }
   };
 
+  /**
+   * Abrir modal ultra-simple para crear o editar una Misión (CRUD completo en 2 clics)
+   */
+  const handleOpenCreateQuestModal = (
+    defaultAssignee = 'Kevin',
+    defaultClient = 'Zenda Agency',
+  ) => {
+    setEditingQuestId(null);
+    setNewSprint({
+      title: '',
+      client: defaultClient || 'Zenda Agency',
+      assignee: normalizeAssignee(defaultAssignee),
+      questDifficulty: getDefaultDifficultyForCategory(defaultClient),
+      customXp: defaultAssignee === 'Marco' ? 150 : 100,
+      stage: 'Guion',
+      priority: 'Urgente',
+      deadline: todayDateStr,
+    });
+    setSprintModalOpen(true);
+  };
+
+  const handleOpenEditQuestModal = (quest) => {
+    if (!quest) return;
+    const diff = getQuestDifficultyInfo(quest);
+    setEditingQuestId(quest.id);
+    setNewSprint({
+      title: quest.title || '',
+      client: quest.client || 'Zenda Agency',
+      assignee: normalizeAssignee(quest.assignee),
+      questDifficulty: quest.questDifficulty || diff.label || 'Guion',
+      customXp: diff.xp,
+      stage: quest.stage || 'Guion',
+      priority: quest.priority || 'Urgente',
+      deadline: quest.deadline || todayDateStr,
+    });
+    setSprintModalOpen(true);
+  };
+
   const handleAddSprint = async (e) => {
     e.preventDefault();
     if (!newSprint.title.trim()) return;
 
-    const isPub = newSprint.stage === 'Publicado';
     const nowIso = new Date().toISOString();
-    const resolvedXp = Math.max(10, Number(newSprint.customXp) || 100);
+    const rawXp = Number(newSprint.customXp);
+    const resolvedXp = Number.isFinite(rawXp)
+      ? Math.max(10, Math.min(5000, Math.round(rawXp)))
+      : 100;
+    const normAssignee = normalizeAssignee(newSprint.assignee);
+    const resolvedClient = newSprint.client || 'Personal / Hábito';
 
+    if (editingQuestId) {
+      const existingQuest = sprints.find((s) => s.id === editingQuestId);
+      const oldXp = existingQuest ? getQuestDifficultyInfo(existingQuest).xp : resolvedXp;
+      const oldTargets = existingQuest ? getAssigneeTargets(existingQuest.assignee) : [];
+      const newTargets = getAssigneeTargets(normAssignee);
+      const wasCompleted = existingQuest && getQuestRpgStatus(existingQuest) === 'Completado';
+
+      const updates = {
+        title: newSprint.title.trim(),
+        client: resolvedClient,
+        assignee: normAssignee,
+        questDifficulty:
+          newSprint.questDifficulty || getDefaultDifficultyForCategory(resolvedClient),
+        customXp: resolvedXp,
+        priority: newSprint.priority || 'Urgente',
+        deadline: newSprint.deadline || todayDateStr,
+        updatedAt: nowIso,
+      };
+
+      const nextList = sprints.map((s) =>
+        s.id === editingQuestId ? { ...s, ...updates } : s,
+      );
+      setSprints(nextList);
+
+      if (wasCompleted) {
+        updateRpgState((prev) => {
+          let kXP = Math.max(0, Number(prev.kevinBaseXP ?? prev.xp?.Kevin ?? 0) || 0);
+          let mXP = Math.max(0, Number(prev.marcoBaseXP ?? prev.xp?.Marco ?? 0) || 0);
+          if (oldTargets.includes('Kevin')) kXP = Math.max(0, kXP - oldXp);
+          if (oldTargets.includes('Marco')) mXP = Math.max(0, mXP - oldXp);
+          if (newTargets.includes('Kevin')) kXP += resolvedXp;
+          if (newTargets.includes('Marco')) mXP += resolvedXp;
+          return {
+            ...prev,
+            kevinBaseXP: kXP,
+            marcoBaseXP: mXP,
+            xp: { Kevin: kXP, Marco: mXP },
+            quests: nextList,
+          };
+        });
+      } else {
+        updateRpgState((prev) => ({ ...prev, quests: nextList }));
+      }
+
+      if (isFirebaseConfigured && db) {
+        try {
+          const { doc, setDoc } = await import('firebase/firestore');
+          await setDoc(doc(db, 'zenda_sprints', editingQuestId), updates, {
+            merge: true,
+          });
+        } catch (err) {
+          console.warn('[Firestore] Error editando misión:', err);
+        }
+      }
+
+      setEditingQuestId(null);
+      setSprintModalOpen(false);
+      showToast(`Misión actualizada (${normAssignee} · +${resolvedXp} XP)`);
+      return;
+    }
+
+    const questId = `sp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const record = {
+      id: questId,
       title: newSprint.title.trim(),
-      client: newSprint.client || zendaClients[0]?.name || 'Zenda Agency',
-      assignee: normalizeAssignee(newSprint.assignee),
+      client: resolvedClient,
+      assignee: normAssignee,
       questDifficulty:
-        newSprint.questDifficulty ||
-        (newSprint.stage === 'Publicado'
-          ? 'Reel Publicado'
-          : newSprint.stage === 'Grabado'
-          ? 'Grabación'
-          : getDefaultDifficultyForCategory(newSprint.client)),
+        newSprint.questDifficulty || getDefaultDifficultyForCategory(resolvedClient),
       customXp: resolvedXp,
-      questStatus: isPub ? 'Completado' : newSprint.stage === 'Grabado' ? 'En Curso' : 'Pendiente',
-      stage: newSprint.stage || 'Guion',
-      priority: newSprint.priority,
-      deadline: newSprint.deadline,
-      isTodayPinned: newSprint.deadline === todayDateStr,
-      completed: isPub,
-      ...(isPub ? { publishedAt: nowIso, completedDate: todayDateStr } : {}),
+      questStatus: 'Pendiente',
+      stage: 'Guion',
+      priority: newSprint.priority || 'Urgente',
+      deadline: newSprint.deadline || todayDateStr,
+      isTodayPinned: true,
+      completed: false,
       createdAt: nowIso,
       updatedAt: nowIso,
     };
 
+    setSprints((prev) => [record, ...prev]);
+
     if (isFirebaseConfigured && db) {
       try {
-        const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
-        await addDoc(collection(db, 'zenda_sprints'), {
+        const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+        await setDoc(doc(db, 'zenda_sprints', questId), {
           ...record,
           serverCreatedAt: serverTimestamp(),
         });
       } catch (err) {
         console.warn('[Firestore] Error add sprint:', err);
       }
-    } else {
-      setSprints((prev) => [{ id: `local-sp-${Date.now()}`, ...record }, ...prev]);
     }
 
     setNewSprint({
@@ -2613,17 +3143,46 @@ export default function AdminDashboard() {
       questDifficulty: 'Guion',
       customXp: 100,
       stage: 'Guion',
-      priority: 'Alta',
+      priority: 'Urgente',
       deadline: getTodayDate(),
     });
+    setEditingQuestId(null);
     setSprintModalOpen(false);
-    showToast(`Quest (+${resolvedXp} XP) guardada en Zenda OS`);
+    showToast(`Misión creada para ${normAssignee} (+${resolvedXp} XP)`);
   };
 
   const handleDeleteSprint = async (id) => {
-    setSprints((prev) => prev.filter((s) => s.id !== id));
-    showToast('Quest eliminada');
-    if (isFirebaseConfigured && db && !id.startsWith('local-sp-')) {
+    const targetQuest = sprints.find((s) => s.id === id);
+    const nextList = sprints.filter((s) => s.id !== id);
+    setSprints(nextList);
+
+    if (targetQuest && getQuestRpgStatus(targetQuest) === 'Completado') {
+      const xpVal = getQuestDifficultyInfo(targetQuest).xp;
+      const targets = getAssigneeTargets(targetQuest.assignee);
+      updateRpgState((prev) => {
+        const prevCredited = Array.isArray(prev.creditedQuestIds)
+          ? prev.creditedQuestIds
+          : [];
+        const wasCredited = prevCredited.includes(id);
+        let kXP = Math.max(0, Number(prev.kevinBaseXP ?? prev.xp?.Kevin ?? 0) || 0);
+        let mXP = Math.max(0, Number(prev.marcoBaseXP ?? prev.xp?.Marco ?? 0) || 0);
+        if (wasCredited && targets.includes('Kevin')) kXP = Math.max(0, kXP - xpVal);
+        if (wasCredited && targets.includes('Marco')) mXP = Math.max(0, mXP - xpVal);
+        return {
+          ...prev,
+          kevinBaseXP: kXP,
+          marcoBaseXP: mXP,
+          xp: { Kevin: kXP, Marco: mXP },
+          creditedQuestIds: prevCredited.filter((qId) => qId !== id),
+          quests: nextList,
+        };
+      });
+    } else {
+      updateRpgState((prev) => ({ ...prev, quests: nextList }));
+    }
+
+    showToast('Misión eliminada');
+    if (isFirebaseConfigured && db) {
       try {
         const { doc, deleteDoc } = await import('firebase/firestore');
         await deleteDoc(doc(db, 'zenda_sprints', id));
@@ -3021,28 +3580,7 @@ export default function AdminDashboard() {
     healedClientFlashId,
   ]);
 
-  // Mantiene sincronizado el mapa clientsHp en Firestore (zenda_system/rpg_state) con el HP real de las 4 tarjetas
-  useEffect(() => {
-    if (!accountHealthCards.length) return;
-    const currentMap = rpgState.clientsHp || rpgState.clientHpMap || {};
-    let hasDiff = false;
-    const nextHpMap = { ...currentMap };
-    for (const card of accountHealthCards) {
-      if (currentMap[card.client.id] !== card.hpPercent) {
-        nextHpMap[card.client.id] = card.hpPercent;
-        hasDiff = true;
-      }
-    }
-    if (hasDiff) {
-      updateRpgState({
-        clientsHp: nextHpMap,
-        clientHpMap: nextHpMap,
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountHealthCards]);
-
-  // 2. QUESTS DEL DÍA (Máximo 3 misiones visibles por jugador: Kevin vs Marco)
+  // 2. QUESTS DEL DÍA (Máximo 3 misiones visibles por jugador: Kevin vs Marco, incluyendo 'Ambos')
   const priorityWeight = (priority) => {
     switch (priority) {
       case 'Urgente':
@@ -3066,7 +3604,7 @@ export default function AdminDashboard() {
   };
 
   const buildAssigneeMissions = (targetAssignee) => {
-    const mine = sprints.filter((s) => normalizeAssignee(s.assignee) === targetAssignee);
+    const mine = sprints.filter((s) => isAssignedToPlayer(s.assignee, targetAssignee));
     const completedTodayList = mine.filter((s) => isCompletedToday(s));
 
     const pendingList = mine
@@ -3118,23 +3656,45 @@ export default function AdminDashboard() {
     return s;
   }, [kevinMissionsData.top3, marcoMissionsData.top3]);
 
-  // 3. PERFILES DE JUGADOR & MOTOR COMPETITIVO 1v1 (0 XP Base Oficial)
+  // 3. PERFILES DE JUGADOR & MOTOR COMPETITIVO 1v1 (Con reconciliación determinística de misiones completadas)
   const currentLocalHour = new Date(nowMs).getHours();
   const isMorningDespegueWindow = currentLocalHour === 7;
 
-  const kevinTotalXP = Math.max(0, Number(rpgState.kevinBaseXP ?? rpgState.xp?.Kevin ?? 0));
+  const creditedQuestIdsSet = useMemo(
+    () => new Set(Array.isArray(rpgState.creditedQuestIds) ? rpgState.creditedQuestIds : []),
+    [rpgState.creditedQuestIds],
+  );
+
+  const uncreditedQuestsXP = useMemo(() => {
+    let kevinExtra = 0;
+    let marcoExtra = 0;
+    for (const sp of sprints) {
+      if (getQuestRpgStatus(sp) === 'Completado' && !creditedQuestIdsSet.has(sp.id)) {
+        const xpVal = Math.max(10, Number(getQuestDifficultyInfo(sp).xp) || 100);
+        if (isAssignedToPlayer(sp.assignee, 'Kevin')) kevinExtra += xpVal;
+        if (isAssignedToPlayer(sp.assignee, 'Marco')) marcoExtra += xpVal;
+      }
+    }
+    return { Kevin: kevinExtra, Marco: marcoExtra };
+  }, [sprints, creditedQuestIdsSet]);
+
+  const rawKevinBase = Number(rpgState.kevinBaseXP ?? rpgState.xp?.Kevin ?? 0);
+  const safeKevinBase = Number.isFinite(rawKevinBase) ? Math.max(0, rawKevinBase) : 0;
+  const kevinTotalXP = safeKevinBase + uncreditedQuestsXP.Kevin;
   const kevinLevel = Math.floor(kevinTotalXP / XP_PER_LEVEL) + 1;
   const kevinLevelXP = kevinTotalXP % XP_PER_LEVEL;
   const kevinLevelPercent = Math.round((kevinLevelXP / XP_PER_LEVEL) * 100);
   const kevinCheckedInToday = rpgState.kevinLastCheckIn === todayDateStr;
 
-  const marcoTotalXP = Math.max(0, Number(rpgState.marcoBaseXP ?? rpgState.xp?.Marco ?? 0));
+  const rawMarcoBase = Number(rpgState.marcoBaseXP ?? rpgState.xp?.Marco ?? 0);
+  const safeMarcoBase = Number.isFinite(rawMarcoBase) ? Math.max(0, rawMarcoBase) : 0;
+  const marcoTotalXP = safeMarcoBase + uncreditedQuestsXP.Marco;
   const marcoLevel = Math.floor(marcoTotalXP / XP_PER_LEVEL) + 1;
   const marcoLevelXP = marcoTotalXP % XP_PER_LEVEL;
   const marcoLevelPercent = Math.round((marcoLevelXP / XP_PER_LEVEL) * 100);
   const marcoCheckedInToday = rpgState.marcoLastCheckIn === todayDateStr;
 
-  // Duelo 1v1 Semanal (Kevin vs Marco) + Psicología Competitiva de Brecha
+  // Duelo 1v1 Semanal (Kevin vs Marco) + Etiqueta Corta de Brecha
   const totalDuelXP = kevinTotalXP + marcoTotalXP;
   const kevinDuelPercent = totalDuelXP > 0 ? Math.round((kevinTotalXP / totalDuelXP) * 100) : 50;
   const marcoDuelPercent = totalDuelXP > 0 ? 100 - kevinDuelPercent : 50;
@@ -3147,10 +3707,25 @@ export default function AdminDashboard() {
   const duelDiffXP = Math.abs(kevinTotalXP - marcoTotalXP);
   const duelGapPsychologyMessage =
     duelLeader === 'Kevin'
-      ? `Marco está a +${duelDiffXP} XP de quitarle la corona a Kevin`
+      ? `Marco a ${duelDiffXP} XP del liderato`
       : duelLeader === 'Marco'
-      ? `Kevin está a +${duelDiffXP} XP de quitarle la corona a Marco`
-      : 'Empate en vivo · La siguiente misión define quién toma la corona';
+      ? `Kevin a ${duelDiffXP} XP del liderato`
+      : 'Empate · Siguiente misión define líder';
+
+  // Recompensas Semanales Elegibles con Fallback Seguro si se elimina la activa
+  const weeklyRewardsList = useMemo(() => {
+    if (Array.isArray(rpgState.weeklyRewards) && rpgState.weeklyRewards.length > 0) {
+      return rpgState.weeklyRewards;
+    }
+    return DEFAULT_WEEKLY_REWARDS;
+  }, [rpgState.weeklyRewards]);
+
+  const activeWeeklyReward = useMemo(() => {
+    const found = weeklyRewardsList.find((r) => r.id === rpgState.activeRewardId);
+    if (found) return found;
+    if (weeklyRewardsList.length > 0) return weeklyRewardsList[0];
+    return { id: 'rew-fallback', emoji: '🏆', title: 'Meta Semanal de Socios' };
+  }, [weeklyRewardsList, rpgState.activeRewardId]);
 
   const recentActivityLog = useMemo(
     () => (Array.isArray(rpgState.activityLog) ? rpgState.activityLog.slice(0, 5) : []),
@@ -3184,7 +3759,7 @@ export default function AdminDashboard() {
 
     return rawHistory.filter((item) => {
       const matchesPlayer =
-        historyPlayerFilter === 'all' || normalizeAssignee(item.player) === historyPlayerFilter;
+        historyPlayerFilter === 'all' || isAssignedToPlayer(item.player, historyPlayerFilter);
       const matchesType =
         historyTypeFilter === 'all' ||
         (historyTypeFilter === 'reel' && item.type === 'reel') ||
@@ -3220,12 +3795,12 @@ export default function AdminDashboard() {
       ...PERSONAL_QUEST_CATEGORIES.map((catName, idx) => ({
         id: `personal-cat-${idx}`,
         name: catName,
-        leadOwner: 'Kevin',
+        leadOwner: 'Ambos',
       })),
       ...customCats.map((catName, idx) => ({
         id: `custom-cat-${idx}`,
         name: catName,
-        leadOwner: 'Kevin',
+        leadOwner: 'Ambos',
       })),
     ];
 
@@ -3236,9 +3811,9 @@ export default function AdminDashboard() {
       );
 
       const filteredTasks = allClientTasks.filter((task) => {
-        const assignee = normalizeAssignee(task.assignee);
         const matchesAssignee =
-          backlogAssigneeFilter === 'all' || assignee === backlogAssigneeFilter;
+          backlogAssigneeFilter === 'all' ||
+          isAssignedToPlayer(task.assignee, backlogAssigneeFilter);
         const matchesQuery =
           !backlogSearchQuery.trim() ||
           String(task.title || '')
@@ -3636,9 +4211,9 @@ export default function AdminDashboard() {
       <div className="flex flex-1 flex-col overflow-y-auto">
         <header className="sticky top-0 z-30 border-b border-[#E2E8F0] bg-[#FFFFFF] px-4 py-3 text-[#0F172A] sm:px-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            {/* Izquierda: Título + SYNC LIVE */}
+            {/* Izquierda: Título + LIVE */}
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5">
                 <button
                   type="button"
                   onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -3646,73 +4221,102 @@ export default function AdminDashboard() {
                 >
                   {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
                 </button>
-                <div className="flex items-center gap-2.5">
-                  <h1 className="text-sm font-bold tracking-tight text-[#0F172A] sm:text-base">
-                    {activeTab === 'command' && 'Centro de Control'}
-                    {activeTab === 'clients' &&
-                      (selectedClient360
-                        ? `Clientes 360° · ${selectedClient360.name}`
-                        : 'Clientes 360°')}
-                    {activeTab === 'pipeline' && 'Pipeline de Contenido'}
-                    {activeTab === 'calendar' && 'Calendario & Rodajes'}
-                    {activeTab === 'finances' && 'Finanzas & Caja'}
-                  </h1>
+                <h1 className="text-base font-bold tracking-tight text-[#0F172A]">
+                  {activeTab === 'command' && 'Zenda OS'}
+                  {activeTab === 'clients' &&
+                    (selectedClient360 ? selectedClient360.name : 'Clientes 360°')}
+                  {activeTab === 'pipeline' && 'Pipeline'}
+                  {activeTab === 'calendar' && 'Calendario'}
+                  {activeTab === 'finances' && 'Finanzas'}
+                </h1>
 
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[10px] font-bold ${
+                    rpgSyncOnline && isFirebaseConfigured
+                      ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
+                      : 'border-[#E2E8F0] bg-[#F8FAFC] text-slate-500'
+                  }`}
+                >
                   <span
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold ${
-                      rpgSyncOnline && isFirebaseConfigured
-                        ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
-                        : 'border-[#E2E8F0] bg-[#F8FAFC] text-slate-500'
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      rpgSyncOnline && isFirebaseConfigured ? 'bg-[#10B981]' : 'bg-slate-400'
                     }`}
-                  >
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${
-                        rpgSyncOnline && isFirebaseConfigured ? 'bg-[#10B981]' : 'bg-slate-400'
-                      }`}
-                    />
-                    {rpgSyncOnline && isFirebaseConfigured ? 'SYNC LIVE' : 'OFFLINE'}
-                  </span>
-                </div>
+                  />
+                  {rpgSyncOnline && isFirebaseConfigured ? 'LIVE' : 'LOCAL'}
+                </span>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setSprintModalOpen(true)}
-                className="inline-flex items-center gap-1 rounded-lg bg-[#0066C5] px-2.5 py-1.5 text-xs font-semibold text-white lg:hidden"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Quest</span>
-              </button>
+              <div className="flex items-center gap-1.5 lg:hidden">
+                <button
+                  type="button"
+                  onClick={handleEnableBrowserAlerts}
+                  className={`rounded-lg border p-2 text-xs transition-colors ${
+                    notificationPermission === 'granted'
+                      ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
+                      : 'border-[#E2E8F0] bg-white text-slate-600'
+                  }`}
+                  title="Alertas del navegador"
+                >
+                  🔔
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettingsPanelOpen((prev) => !prev)}
+                  className="rounded-lg border border-[#E2E8F0] bg-white p-2 text-slate-600"
+                  title="Configuración"
+                >
+                  <Settings className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenCreateQuestModal('Kevin', 'Zenda Agency')}
+                  className="inline-flex items-center gap-1 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-bold text-white"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Misión</span>
+                </button>
+              </div>
             </div>
 
-            {/* Centro: Meta Semanal 12/12 compacta */}
-            <div className="flex flex-1 items-center gap-3 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3.5 py-2 lg:max-w-xl">
+            {/* Centro: Meta Semanal 12/12 + Recompensa Elegida (Sin cortar texto) */}
+            <div className="flex flex-1 items-center gap-3 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3.5 py-2 lg:max-w-2xl">
               <Trophy
                 className={`h-4 w-4 shrink-0 ${
                   isBossChestUnlocked ? 'text-[#10B981]' : 'text-[#0066C5]'
                 }`}
               />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span className="font-semibold text-[#0F172A]">Meta Semanal:</span>
-                    <input
-                      type="text"
-                      value={rpgState.weeklyRewardText}
-                      onChange={(e) =>
-                        updateRpgState({ weeklyRewardText: e.target.value })
-                      }
-                      aria-label="Recompensa semanal"
-                      className="w-40 sm:w-52 truncate rounded border border-transparent bg-transparent px-1 py-0.5 text-xs font-medium text-slate-600 outline-none hover:border-[#E2E8F0] focus:border-[#0066C5] focus:bg-white"
-                    />
+              <div className="flex-1">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-[#0F172A]">Meta Semanal:</span>
+                    <button
+                      type="button"
+                      onClick={() => setRewardsModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-0.5 text-xs font-semibold text-[#0F172A] transition-colors hover:border-[#0066C5] hover:text-[#0066C5]"
+                      title="Elegir o editar recompensas semanales"
+                    >
+                      <span>{activeWeeklyReward.emoji}</span>
+                      <span>{activeWeeklyReward.title}</span>
+                      <Pencil className="h-3 w-3 text-slate-400" />
+                    </button>
                   </div>
-                  <span
-                    className={`shrink-0 font-mono text-xs font-bold ${
-                      isBossChestUnlocked ? 'text-[#10B981]' : 'text-[#0066C5]'
-                    }`}
-                  >
-                    {weeklyPublishedCount}/{WEEKLY_AGENCY_GOAL}
-                  </span>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRewardsModalOpen(true)}
+                      className="font-mono text-[11px] font-semibold text-[#0066C5] hover:underline"
+                    >
+                      Recompensas ({weeklyRewardsList.length})
+                    </button>
+                    <span
+                      className={`font-mono text-sm font-bold ${
+                        isBossChestUnlocked ? 'text-[#10B981]' : 'text-[#0F172A]'
+                      }`}
+                    >
+                      {weeklyPublishedCount}/{WEEKLY_AGENCY_GOAL}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[#E2E8F0]">
                   <motion.div
@@ -3727,51 +4331,50 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Derecha: Acciones discretas + Alertas + Configuración */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Derecha: Íconos discretos (Alertas, Configuración) + Único Botón Principal (+ Misión) */}
+            <div className="hidden items-center gap-2 lg:flex">
               <button
                 type="button"
                 onClick={handleEnableBrowserAlerts}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border text-xs transition-colors ${
                   notificationPermission === 'granted'
                     ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
-                    : 'border-[#E2E8F0] bg-white text-[#0F172A] hover:border-[#0066C5] hover:text-[#0066C5]'
+                    : 'border-[#E2E8F0] bg-white text-slate-600 hover:border-[#0066C5] hover:text-[#0066C5]'
                 }`}
-                title="Notificaciones Web Push 15 min antes de eventos y 7:25 AM Despegue"
+                title={
+                  notificationPermission === 'granted'
+                    ? 'Alertas activas (15 min antes y 7:25 AM)'
+                    : 'Activar alertas del navegador'
+                }
               >
-                <span>
-                  {notificationPermission === 'granted'
-                    ? '🔔 Alertas Activas'
-                    : '🔔 Activar Alertas'}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSprintModalOpen(true)}
-                className="hidden items-center gap-1.5 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#0052A3] lg:inline-flex"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Nueva Quest</span>
+                🔔
               </button>
 
               <button
                 type="button"
                 onClick={() => setSettingsPanelOpen((prev) => !prev)}
-                className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
                   settingsPanelOpen
                     ? 'border-[#0066C5] bg-[#0066C5]/10 text-[#0066C5]'
                     : 'border-[#E2E8F0] bg-white text-slate-600 hover:bg-[#F8FAFC] hover:text-[#0F172A]'
                 }`}
-                title="Configuración: Webhook URL, Sonido y Reiniciar Temporada a 0"
+                title="Configuración"
               >
-                <Settings className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Configuración</span>
+                <Settings className="h-4 w-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleOpenCreateQuestModal('Kevin', 'Zenda Agency')}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#0066C5] px-3.5 py-1.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-[#0052A3]"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Misión</span>
               </button>
             </div>
           </div>
 
-          {/* Panel de Configuración Discreto (Webhook n8n/WhatsApp, Reiniciar Temporada a 0, Sonido y Base) */}
+          {/* Panel de Configuración Discreto */}
           <AnimatePresence>
             {settingsPanelOpen && (
               <motion.div
@@ -3782,10 +4385,9 @@ export default function AdminDashboard() {
                 className="overflow-hidden"
               >
                 <div className="mt-3 flex flex-col gap-3 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3 lg:flex-row lg:items-center lg:justify-between">
-                  {/* Webhook URL opcional (n8n / WhatsApp) */}
                   <div className="flex flex-1 flex-col gap-1.5 sm:flex-row sm:items-center">
                     <label className="shrink-0 font-mono text-[11px] font-semibold text-[#0F172A]">
-                      Webhook URL (n8n / WhatsApp):
+                      Webhook URL:
                     </label>
                     <div className="flex flex-1 gap-2">
                       <input
@@ -3807,17 +4409,16 @@ export default function AdminDashboard() {
                               assignedTo: 'Kevin & Marco',
                               trigger: 'manual_test',
                             });
-                            showToast('POST JSON enviado al Webhook configurado');
+                            showToast('POST enviado al Webhook');
                           }}
                           className="shrink-0 rounded-lg border border-[#0066C5] bg-white px-2.5 py-1.5 font-mono text-[11px] font-semibold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
                         >
-                          Probar POST
+                          Probar
                         </button>
                       )}
                     </div>
                   </div>
 
-                  {/* Controles de Temporada y Sistema */}
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
@@ -3834,13 +4435,10 @@ export default function AdminDashboard() {
                       disabled={isResettingSeason}
                       onClick={handleResetSeasonToZero}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 font-mono text-[11px] font-semibold text-[#0F172A] transition-colors hover:border-[#0066C5] hover:text-[#0066C5] disabled:opacity-50"
-                      title="Reinicia XP a 0, LVL 1, Racha 0d y 0/12 Reels en Firestore"
                     >
                       <RotateCcw className="h-3 w-3" />
                       <span>
-                        {isResettingSeason
-                          ? 'Reiniciando...'
-                          : 'Reiniciar Temporada a 0'}
+                        {isResettingSeason ? 'Reiniciando...' : 'Reiniciar a 0'}
                       </span>
                     </button>
 
@@ -3848,7 +4446,6 @@ export default function AdminDashboard() {
                       type="button"
                       onClick={() => setResetModalOpen(true)}
                       className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 font-mono text-[11px] font-medium text-slate-500 hover:border-[#EF4444]/40 hover:text-[#EF4444]"
-                      title="Purgar colecciones de Firestore"
                     >
                       <span>Purgar Base</span>
                     </button>
@@ -3898,7 +4495,7 @@ export default function AdminDashboard() {
         <main className="flex-1 p-4 pb-24 sm:p-6 md:pb-10">
           <AnimatePresence mode="wait">
             {/* ================================================================ */}
-            {/* VISTA PRINCIPAL: DASHBOARD RPG MINIMALISTA                       */}
+            {/* VISTA PRINCIPAL: DASHBOARD RPG LIMPIO Y ESCANEABLE               */}
             {/* ================================================================ */}
             {activeTab === 'command' && (
               <motion.div
@@ -3910,8 +4507,7 @@ export default function AdminDashboard() {
                 className="space-y-5"
               >
                 {/* ============================================================ */}
-                {/* 1. FILA SUPERIOR: 4 CUENTAS COMPACTAS                        */}
-                {/* (Nombre, barra fina de HP %, horas sin publicar, Métricas y + Publicar Anti-Trampa) */}
+                {/* 1. FILA SUPERIOR: 4 CUENTAS (HP, Horas, Perfil y + Publicar) */}
                 {/* ============================================================ */}
                 <section aria-label="Estado de Cuentas">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -3926,11 +4522,6 @@ export default function AdminDashboard() {
 
                       const isOptimal = statusKey === 'green';
                       const isCritical = statusKey === 'red';
-                      const socialMetrics = getClientSocialMetrics(client);
-                      const totalFollowers =
-                        socialMetrics.tiktokFollowers +
-                        socialMetrics.instagramFollowers +
-                        socialMetrics.facebookFollowers;
 
                       const barColor = isOptimal
                         ? 'bg-[#10B981]'
@@ -3941,44 +4532,37 @@ export default function AdminDashboard() {
                       return (
                         <div
                           key={client.id}
-                          className={`flex flex-col justify-between rounded-xl border bg-[#FFFFFF] p-3.5 shadow-sm transition-colors ${
+                          className={`flex flex-col justify-between rounded-2xl border bg-[#FFFFFF] p-4 shadow-sm transition-colors ${
                             isHealedFlashing
                               ? 'border-[#10B981]'
                               : 'border-[#E2E8F0]'
                           }`}
                         >
-                          {/* Fila 1: Nombre + HP (%) */}
+                          {/* Fila 1: Nombre + HP grande */}
                           <div className="flex items-center justify-between gap-2">
                             <button
                               type="button"
                               onClick={() => handleOpenClient360(client.id, 'metrics')}
-                              className="truncate text-left text-sm font-bold text-[#0F172A] hover:text-[#0066C5]"
+                              className="text-left text-sm font-bold text-[#0F172A] hover:text-[#0066C5]"
                             >
                               {client.name}
                             </button>
 
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              {isCritical && (
-                                <span className="rounded bg-[#EF4444]/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#EF4444]">
-                                  Alerta
-                                </span>
-                              )}
-                              <span
-                                className={`font-mono text-xs font-bold ${
-                                  isCritical
-                                    ? 'text-[#EF4444]'
-                                    : isOptimal
-                                    ? 'text-[#10B981]'
-                                    : 'text-[#0F172A]'
-                                }`}
-                              >
-                                {hpPercent}% HP
-                              </span>
-                            </div>
+                            <span
+                              className={`font-mono text-sm font-bold ${
+                                isCritical
+                                  ? 'text-[#EF4444]'
+                                  : isOptimal
+                                  ? 'text-[#10B981]'
+                                  : 'text-[#0F172A]'
+                              }`}
+                            >
+                              {hpPercent}% HP
+                            </span>
                           </div>
 
                           {/* Fila 2: Barra fina de HP */}
-                          <div className="my-2.5 h-1.5 w-full overflow-hidden rounded-full bg-[#F8FAFC] ring-1 ring-[#E2E8F0]">
+                          <div className="my-2.5 h-1.5 w-full overflow-hidden rounded-full bg-[#E2E8F0]">
                             <motion.div
                               initial={{ width: 0 }}
                               animate={{ width: `${hpPercent}%` }}
@@ -3987,26 +4571,24 @@ export default function AdminDashboard() {
                             />
                           </div>
 
-                          {/* Fila 3: Horas sin publicar + Ver Perfil/Métricas + Botón + Publicar Anti-Trampa */}
-                          <div className="flex items-center justify-between gap-1.5">
-                            <div className="flex flex-col">
-                              <span className="font-mono text-[11px] text-slate-500">
-                                {hoursSincePublish}h sin publicar
-                              </span>
+                          {/* Fila 3: Horas + Perfil + Publicar */}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 font-mono text-xs">
+                              <span className="text-slate-500">{hoursSincePublish}h</span>
+                              <span className="text-slate-300">·</span>
                               <button
                                 type="button"
                                 onClick={() => handleOpenMetricsModal(client)}
-                                className="text-left font-mono text-[10px] font-semibold text-[#0066C5] hover:underline"
+                                className="font-semibold text-[#0066C5] hover:underline"
                               >
-                                Ver Perfil / Métricas
-                                {totalFollowers > 0 ? ` (${totalFollowers.toLocaleString()} seg)` : ''}
+                                Perfil
                               </button>
                             </div>
 
                             <button
                               type="button"
                               onClick={() => handleOpenPublishModal(client)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1.5 text-xs font-semibold text-[#0F172A] transition-colors hover:border-[#0066C5] hover:bg-[#0066C5] hover:text-white"
+                              className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-xs font-semibold text-[#0F172A] transition-colors hover:border-[#0066C5] hover:bg-[#0066C5] hover:text-white"
                             >
                               <Plus className="h-3 w-3" />
                               <span>Publicar</span>
@@ -4019,28 +4601,27 @@ export default function AdminDashboard() {
                 </section>
 
                 {/* ============================================================ */}
-                {/* 2. MOTOR COMPETITIVO 1v1 (DUELO SEMANAL KEVIN VS MARCO)      */}
-                {/* Barra comparativa de XP, 👑 Líder Actual, Psicología y Log   */}
+                {/* 2. DUELO SEMANAL 1v1 (KEVIN VS MARCO) & ACTIVIDAD EN VIVO    */}
                 {/* ============================================================ */}
                 <section
-                  aria-label="Duelo Semanal 1v1 Kevin vs Marco y Log de Actividad"
-                  className="rounded-2xl border border-[#E2E8F0] bg-[#FFFFFF] p-4 shadow-sm"
+                  aria-label="Duelo Semanal 1v1"
+                  className="rounded-2xl border border-[#E2E8F0] bg-[#FFFFFF] p-4 sm:p-5 shadow-sm"
                 >
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-center">
-                    {/* Izquierda: Marcador 1v1 + Barra Comparativa de XP + Psicología */}
-                    <div className="space-y-2.5 lg:col-span-7 lg:border-r lg:border-[#E2E8F0] lg:pr-5">
+                  <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 lg:items-center">
+                    {/* Izquierda: Marcador 1v1 */}
+                    <div className="space-y-3 lg:col-span-7 lg:border-r lg:border-[#E2E8F0] lg:pr-6">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-bold uppercase tracking-wider text-[#0F172A]">
-                            Duelo Semanal 1v1
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Duelo 1v1
                           </span>
                           {duelLeader ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-[#10B981]/30 bg-[#10B981]/10 px-2.5 py-0.5 font-mono text-[11px] font-bold text-[#10B981]">
-                              <span>👑 Líder Actual: {duelLeader} (+{duelDiffXP} XP)</span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-[#10B981]/10 px-2.5 py-0.5 font-mono text-xs font-bold text-[#10B981]">
+                              👑 {duelLeader} (+{duelDiffXP} XP)
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-0.5 font-mono text-[11px] font-semibold text-slate-600">
-                              <span>Empate ({kevinTotalXP} - {marcoTotalXP} XP)</span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-[#F8FAFC] px-2.5 py-0.5 font-mono text-xs font-semibold text-slate-600">
+                              Empate
                             </span>
                           )}
                         </div>
@@ -4049,108 +4630,110 @@ export default function AdminDashboard() {
                           <button
                             type="button"
                             onClick={() => setPenaltyModalOpen(true)}
-                            className="inline-flex items-center gap-1 rounded-md border border-[#EF4444]/30 bg-[#EF4444]/5 px-2 py-0.5 font-mono text-[10px] font-semibold text-[#EF4444] transition-colors hover:bg-[#EF4444] hover:text-white"
-                            title="Registrar penalización de -100 XP por incumplimiento o quedarse dormido"
+                            className="rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/5 px-2.5 py-1 font-mono text-[11px] font-semibold text-[#EF4444] transition-colors hover:bg-[#EF4444] hover:text-white"
+                            title="Aplicar penalización (-100 XP)"
                           >
-                            <span>⚠️ Penalización (-100 XP)</span>
+                            -100 XP
                           </button>
 
                           <button
                             type="button"
                             disabled={isResettingSeason}
                             onClick={handleResetSeasonToZero}
-                            className="inline-flex items-center gap-1 rounded-md border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-500 transition-colors hover:border-[#0066C5] hover:text-[#0066C5]"
-                            title="Reiniciar temporada competitiva a 0 XP"
+                            className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 font-mono text-[11px] font-semibold text-slate-600 transition-colors hover:border-[#0066C5] hover:text-[#0066C5]"
+                            title="Reiniciar temporada a 0 XP"
                           >
-                            <RotateCcw className="h-2.5 w-2.5" />
-                            <span>Reiniciar a 0</span>
+                            <RotateCcw className="h-3 w-3" />
+                            <span>Reiniciar</span>
                           </button>
                         </div>
                       </div>
 
-                      {/* Marcadores Jugadores */}
-                      <div className="flex items-center justify-between font-mono text-xs">
-                        <div className="flex items-center gap-1.5">
-                          <span className="h-2 w-2 rounded-full bg-[#0066C5]" />
-                          <span className="font-bold text-[#0F172A]">Kevin</span>
-                          <span className="font-semibold text-[#0066C5]">
-                            {kevinTotalXP.toLocaleString()} XP
-                          </span>
-                          <span className="text-[10px] text-slate-400">
-                            (LVL {kevinLevel} · {kevinDuelPercent}%)
-                          </span>
+                      {/* Números grandes de XP de cada socio */}
+                      <div className="flex items-baseline justify-between">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="h-2.5 w-2.5 rounded-full bg-[#0066C5]" />
+                            <span className="text-sm font-bold text-[#0F172A]">Kevin</span>
+                            <span className="rounded bg-[#0066C5]/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#0066C5]">
+                              LVL {kevinLevel}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 font-mono text-2xl font-bold text-[#0066C5]">
+                            {kevinTotalXP.toLocaleString()} <span className="text-xs font-semibold">XP</span>
+                          </p>
                         </div>
 
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-slate-400">
-                            ({marcoDuelPercent}% · LVL {marcoLevel})
-                          </span>
-                          <span className="font-semibold text-[#0F172A]">
-                            {marcoTotalXP.toLocaleString()} XP
-                          </span>
-                          <span className="font-bold text-[#0F172A]">Marco</span>
-                          <span className="h-2 w-2 rounded-full bg-[#0F172A]" />
+                        <div className="text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#0F172A]">
+                              LVL {marcoLevel}
+                            </span>
+                            <span className="text-sm font-bold text-[#0F172A]">Marco</span>
+                            <span className="h-2.5 w-2.5 rounded-full bg-[#0F172A]" />
+                          </div>
+                          <p className="mt-0.5 font-mono text-2xl font-bold text-[#0F172A]">
+                            {marcoTotalXP.toLocaleString()} <span className="text-xs font-semibold">XP</span>
+                          </p>
                         </div>
                       </div>
 
-                      {/* Barra Comparativa 1v1 en tiempo real */}
-                      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-[#F8FAFC] ring-1 ring-[#E2E8F0]">
+                      {/* Barra Comparativa 1v1 */}
+                      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-[#E2E8F0]">
                         <motion.div
                           initial={{ width: '50%' }}
                           animate={{ width: `${kevinDuelPercent}%` }}
                           transition={{ duration: 0.45, ease: 'easeOut' }}
                           className="h-full bg-[#0066C5]"
-                          title={`Kevin: ${kevinTotalXP} XP (${kevinDuelPercent}%)`}
                         />
                         <motion.div
                           initial={{ width: '50%' }}
                           animate={{ width: `${marcoDuelPercent}%` }}
                           transition={{ duration: 0.45, ease: 'easeOut' }}
                           className="h-full bg-[#0F172A]"
-                          title={`Marco: ${marcoTotalXP} XP (${marcoDuelPercent}%)`}
                         />
                       </div>
 
-                      {/* Mensaje Psicológico de Brecha en Tiempo Real */}
-                      <div className="flex items-center justify-between rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5">
-                        <span className="font-mono text-[11px] font-semibold text-[#0F172A]">
+                      {/* Etiqueta corta y escaneable de brecha */}
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-mono font-semibold text-slate-600">
                           ⚡ {duelGapPsychologyMessage}
                         </span>
                         <button
                           type="button"
                           onClick={() => setBottomSectionTab('history')}
-                          className="shrink-0 font-mono text-[10px] font-bold text-[#0066C5] hover:underline"
+                          className="font-mono text-xs font-bold text-[#0066C5] hover:underline"
                         >
-                          Ver Historial ({filteredVictoryHistory.length}) →
+                          Historial ({filteredVictoryHistory.length}) →
                         </button>
                       </div>
                     </div>
 
-                    {/* Derecha: Log de Actividad en Vivo (Últimas 5 acciones completadas con hora exacta) */}
+                    {/* Derecha: Actividad Reciente (Últimas 5) */}
                     <div className="lg:col-span-5">
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                          Log de Actividad en Vivo (Últimas 5)
+                          Actividad en Vivo
                         </span>
-                        <span className="font-mono text-[10px] text-[#10B981]">
-                          ● Tiempo Real
+                        <span className="font-mono text-[10px] font-semibold text-[#10B981]">
+                          ● En vivo
                         </span>
                       </div>
 
                       {recentActivityLog.length === 0 ? (
-                        <p className="mt-2 rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-center font-mono text-[11px] text-slate-400">
-                          Temporada en 0 XP. Completa la primera Quest para inaugurar el marcador.
+                        <p className="mt-2 rounded-xl bg-[#F8FAFC] px-3 py-4 text-center font-mono text-xs text-slate-400">
+                          Sin actividad aún. Completa una misión para sumar XP.
                         </p>
                       ) : (
-                        <div className="mt-1.5 space-y-1">
+                        <div className="mt-2 space-y-1.5">
                           {recentActivityLog.map((entry) => {
                             const isPenalty = Number(entry.xp) < 0;
                             return (
                               <div
                                 key={entry.id}
-                                className="flex items-center justify-between gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-[11px]"
+                                className="flex items-center justify-between gap-2 rounded-lg bg-[#F8FAFC] px-3 py-1.5 text-xs"
                               >
-                                <div className="flex items-center gap-1.5 truncate">
+                                <div className="flex items-center gap-2 min-w-0">
                                   <span className="shrink-0 font-mono text-[10px] text-slate-400">
                                     {entry.time}
                                   </span>
@@ -4166,25 +4749,9 @@ export default function AdminDashboard() {
                                   <span className="truncate font-medium text-[#0F172A]">
                                     {entry.action}
                                   </span>
-                                  {entry.category && (
-                                    <span className="hidden shrink-0 rounded bg-white px-1.5 py-0.5 font-mono text-[9px] text-slate-500 ring-1 ring-[#E2E8F0] sm:inline">
-                                      {entry.category}
-                                    </span>
-                                  )}
-                                  {entry.link && (
-                                    <a
-                                      href={entry.link}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="shrink-0 text-[#0066C5] hover:underline"
-                                      title="Abrir Reel publicado"
-                                    >
-                                      <ExternalLink className="h-3 w-3" />
-                                    </a>
-                                  )}
                                 </div>
                                 <span
-                                  className={`shrink-0 font-mono text-[10px] font-bold ${
+                                  className={`shrink-0 font-mono text-xs font-bold ${
                                     isPenalty ? 'text-[#EF4444]' : 'text-[#10B981]'
                                   }`}
                                 >
@@ -4200,14 +4767,14 @@ export default function AdminDashboard() {
                 </section>
 
                 {/* ============================================================ */}
-                {/* 3. PERFILES (KEVIN VS MARCO) & CREADOR DE MISIONES XP LIBRE  */}
+                {/* 3. TARJETAS DE KEVIN Y MARCO (JERARQUÍA CLARA Y 1 CLIC)      */}
                 {/* ============================================================ */}
-                <section aria-label="Jugadores y Quests del Día">
+                <section aria-label="Jugadores y Misiones de Hoy">
                   <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                     {[
                       {
                         player: 'Kevin',
-                        classTitle: 'Kevin · Arquitecto IA',
+                        roleLabel: 'Arquitecto IA',
                         avatarText: 'KV',
                         level: kevinLevel,
                         totalXP: kevinTotalXP,
@@ -4221,7 +4788,7 @@ export default function AdminDashboard() {
                       },
                       {
                         player: 'Marco',
-                        classTitle: 'Marco · Director de Campo',
+                        roleLabel: 'Director de Campo',
                         avatarText: 'MC',
                         level: marcoLevel,
                         totalXP: marcoTotalXP,
@@ -4240,32 +4807,43 @@ export default function AdminDashboard() {
                       return (
                         <div
                           key={hunter.player}
-                          className="flex flex-col justify-between rounded-2xl border border-[#E2E8F0] bg-[#FFFFFF] p-4 sm:p-5 shadow-sm"
+                          className="flex flex-col justify-between rounded-2xl border border-[#E2E8F0] bg-[#FFFFFF] p-5 shadow-sm"
                         >
                           <div>
-                            {/* Perfil compacto */}
-                            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E2E8F0] pb-3.5">
+                            {/* Cabecera del Socio con números grandes */}
+                            <div className="flex flex-wrap items-center justify-between gap-3">
                               <div className="flex items-center gap-3">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0066C5] font-mono text-sm font-bold text-white">
+                                <div
+                                  className={`flex h-11 w-11 items-center justify-center rounded-xl font-mono text-sm font-bold text-white ${
+                                    hunter.player === 'Kevin' ? 'bg-[#0066C5]' : 'bg-[#0F172A]'
+                                  }`}
+                                >
                                   {hunter.avatarText}
                                 </div>
                                 <div>
                                   <div className="flex items-center gap-2">
-                                    <h2 className="text-base font-bold text-[#0F172A]">
-                                      {hunter.classTitle}
+                                    <h2 className="text-lg font-bold text-[#0F172A]">
+                                      {hunter.player}
                                     </h2>
-                                    <span className="rounded-md bg-[#0066C5]/10 px-2 py-0.5 font-mono text-[11px] font-bold text-[#0066C5]">
+                                    <span className="text-xs text-slate-400">
+                                      · {hunter.roleLabel}
+                                    </span>
+                                    <span className="rounded-md bg-[#0066C5]/10 px-2 py-0.5 font-mono text-xs font-bold text-[#0066C5]">
                                       LVL {hunter.level}
                                     </span>
                                   </div>
-                                  <p className="font-mono text-xs text-slate-500">
-                                    {hunter.totalXP.toLocaleString()} XP · Racha 7:30 AM:{' '}
-                                    <strong className="text-[#0F172A]">{hunter.earlyStreak}d</strong>
-                                  </p>
+                                  <div className="mt-0.5 flex items-center gap-3 font-mono text-xs">
+                                    <span className="text-sm font-bold text-[#0F172A]">
+                                      {hunter.totalXP.toLocaleString()} XP
+                                    </span>
+                                    <span className="text-slate-400">
+                                      Racha: <strong className="text-[#0F172A]">{hunter.earlyStreak}d</strong>
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
 
-                              {/* Botón 7:30 AM Despegue (habilitado entre 7:00 AM y 8:00 AM) */}
+                              {/* Check-in 7:30 AM compacto */}
                               <button
                                 type="button"
                                 disabled={!isMorningDespegueWindow || hunter.checkedInToday}
@@ -4277,26 +4855,24 @@ export default function AdminDashboard() {
                                     ? 'border-[#0066C5] bg-[#0066C5] text-white hover:bg-[#0052A3]'
                                     : 'cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] text-slate-400'
                                 }`}
-                                title="Habilitado entre 7:00 AM y 8:00 AM"
+                                title="Check-in matutino (7:00 AM a 8:00 AM)"
                               >
                                 <Clock className="h-3.5 w-3.5" />
                                 <span>
-                                  {hunter.checkedInToday
-                                    ? '7:30 AM Despegue ✓'
-                                    : '7:30 AM Despegue (+50 XP)'}
+                                  {hunter.checkedInToday ? '7:30 AM ✓' : '7:30 AM (+50 XP)'}
                                 </span>
                               </button>
                             </div>
 
-                            {/* Barra fina de XP */}
+                            {/* Barra de Nivel limpia */}
                             <div className="mt-3">
                               <div className="flex items-center justify-between font-mono text-[11px] text-slate-500">
-                                <span>Progreso LVL {hunter.level + 1}</span>
-                                <span className="font-semibold text-[#0F172A]">
-                                  {hunter.levelXP} / {XP_PER_LEVEL} XP
+                                <span>Nivel {hunter.level}</span>
+                                <span>
+                                  {hunter.levelXP}/{XP_PER_LEVEL} XP
                                 </span>
                               </div>
-                              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[#F8FAFC] ring-1 ring-[#E2E8F0]">
+                              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[#E2E8F0]">
                                 <motion.div
                                   initial={{ width: 0 }}
                                   animate={{ width: `${hunter.levelPercent}%` }}
@@ -4306,23 +4882,28 @@ export default function AdminDashboard() {
                               </div>
                             </div>
 
-                            {/* Cabecera Quests del Día */}
-                            <div className="mt-4 flex items-center justify-between">
+                            {/* Encabezado Misiones de Hoy */}
+                            <div className="mt-5 flex items-center justify-between">
                               <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                                Quests de Hoy ({hunter.missionsData.top3.length}/3)
+                                Hoy ({doneToday}/3)
                               </span>
-                              <span
-                                className={`rounded-full px-2 py-0.5 font-mono text-[11px] font-bold ${
-                                  all3Cleared
-                                    ? 'bg-[#10B981]/10 text-[#10B981]'
-                                    : 'bg-[#F8FAFC] text-slate-600'
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleOpenCreateQuestModal(
+                                    hunter.player,
+                                    hunter.quickForm.client,
+                                  )
+                                }
+                                className={`font-mono text-xs font-bold ${
+                                  all3Cleared ? 'text-[#10B981]' : 'text-[#0066C5] hover:underline'
                                 }`}
                               >
-                                {doneToday}/3 completadas
-                              </span>
+                                + Modal Misión
+                              </button>
                             </div>
 
-                            {/* Creador de Misiones Personalizadas con XP Libre (50, 100, 150, 250, 500 + input numérico) y Categorías */}
+                            {/* Creador Rápido de Misión en 2 clics */}
                             <form
                               onSubmit={(e) => {
                                 e.preventDefault();
@@ -4339,10 +4920,31 @@ export default function AdminDashboard() {
                                 });
                                 hunter.setQuickForm({ ...hunter.quickForm, title: '' });
                               }}
-                              className="mt-2.5 flex flex-col gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-2.5"
+                              className="mt-2.5 space-y-2 rounded-xl bg-[#F8FAFC] p-3"
                             >
-                              {/* Fila 1: Selector de Categoría + Botón Crear Categoría */}
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={hunter.quickForm.title}
+                                  onChange={(e) =>
+                                    hunter.setQuickForm({
+                                      ...hunter.quickForm,
+                                      title: e.target.value,
+                                    })
+                                  }
+                                  placeholder={`Nueva misión para ${hunter.player}...`}
+                                  className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5]"
+                                />
+                                <button
+                                  type="submit"
+                                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-[#0052A3]"
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                  <span>Crear</span>
+                                </button>
+                              </div>
+
+                              <div className="flex flex-wrap items-center justify-between gap-2">
                                 <select
                                   value={hunter.quickForm.client}
                                   onChange={(e) => {
@@ -4357,16 +4959,16 @@ export default function AdminDashboard() {
                                       questDifficulty: getDefaultDifficultyForCategory(val),
                                     });
                                   }}
-                                  className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5]"
+                                  className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1 text-xs font-medium text-[#0F172A] outline-none focus:border-[#0066C5]"
                                 >
-                                  <optgroup label="Clientes Oficiales">
+                                  <optgroup label="Clientes">
                                     {zendaClients.map((c) => (
                                       <option key={c.id} value={c.name}>
                                         {c.name}
                                       </option>
                                     ))}
                                   </optgroup>
-                                  <optgroup label="Personal & Hábitos">
+                                  <optgroup label="Personal">
                                     {PERSONAL_QUEST_CATEGORIES.map((cat) => (
                                       <option key={cat} value={cat}>
                                         {cat}
@@ -4374,7 +4976,7 @@ export default function AdminDashboard() {
                                     ))}
                                   </optgroup>
                                   {(rpgState.customCategories || []).length > 0 && (
-                                    <optgroup label="Categorías Personalizadas">
+                                    <optgroup label="Otras">
                                       {(rpgState.customCategories || []).map((cat) => (
                                         <option key={cat} value={cat}>
                                           {cat}
@@ -4382,58 +4984,10 @@ export default function AdminDashboard() {
                                       ))}
                                     </optgroup>
                                   )}
-                                  <option value="__create_new__">+ Crear nueva categoría...</option>
+                                  <option value="__create_new__">+ Nueva categoría...</option>
                                 </select>
 
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setAddingCustomCategoryFor(
-                                      addingCustomCategoryFor === hunter.player
-                                        ? null
-                                        : hunter.player,
-                                    )
-                                  }
-                                  className="shrink-0 rounded-lg border border-[#E2E8F0] bg-white px-2 py-1.5 font-mono text-[10px] font-semibold text-slate-600 hover:border-[#0066C5] hover:text-[#0066C5]"
-                                  title="Crear nueva categoría"
-                                >
-                                  + Categoría
-                                </button>
-                              </div>
-
-                              {/* Input inline si está creando una categoría nueva */}
-                              {addingCustomCategoryFor === hunter.player && (
-                                <div className="flex items-center gap-1.5 rounded-lg border border-[#0066C5]/40 bg-white p-1.5">
-                                  <input
-                                    type="text"
-                                    value={customCategoryDraft}
-                                    onChange={(e) => setCustomCategoryDraft(e.target.value)}
-                                    placeholder="Nombre de categoría (ej. Prospección B2B)..."
-                                    className="flex-1 px-2 py-1 text-xs text-[#0F172A] outline-none"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleCreateCustomCategory(hunter.player)}
-                                    className="rounded-md bg-[#0066C5] px-2.5 py-1 font-mono text-[10px] font-bold text-white"
-                                  >
-                                    Guardar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setAddingCustomCategoryFor(null)}
-                                    className="rounded-md px-1.5 py-1 text-xs text-slate-400 hover:text-slate-700"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              )}
-
-                              {/* Fila 2: Botones rápidos de XP Libre (50, 100, 150, 250, 500 XP) + Input Numérico Editable */}
-                              <div className="flex flex-wrap items-center justify-between gap-1.5">
                                 <div className="flex flex-wrap items-center gap-1">
-                                  <span className="font-mono text-[10px] font-semibold text-slate-500">
-                                    XP:
-                                  </span>
                                   {QUICK_XP_PRESETS.map((xpPreset) => {
                                     const isSelectedXp =
                                       Number(hunter.quickForm.customXp) === xpPreset;
@@ -4450,16 +5004,13 @@ export default function AdminDashboard() {
                                         className={`rounded-md px-2 py-0.5 font-mono text-[10px] font-bold transition-colors ${
                                           isSelectedXp
                                             ? 'bg-[#0066C5] text-white'
-                                            : 'border border-[#E2E8F0] bg-white text-slate-600 hover:border-[#0066C5] hover:text-[#0066C5]'
+                                            : 'bg-white text-slate-600 hover:text-[#0066C5]'
                                         }`}
                                       >
                                         +{xpPreset}
                                       </button>
                                     );
                                   })}
-                                </div>
-
-                                <div className="flex items-center gap-1">
                                   <input
                                     type="number"
                                     min="10"
@@ -4473,167 +5024,135 @@ export default function AdminDashboard() {
                                       })
                                     }
                                     aria-label="XP Libre"
-                                    className="w-16 rounded-md border border-[#E2E8F0] bg-white px-2 py-0.5 text-right font-mono text-xs font-bold text-[#0066C5] outline-none focus:border-[#0066C5]"
+                                    className="w-14 rounded-md border border-[#E2E8F0] bg-white px-1.5 py-0.5 text-right font-mono text-xs font-bold text-[#0066C5] outline-none focus:border-[#0066C5]"
                                   />
-                                  <span className="font-mono text-[10px] font-bold text-[#0066C5]">
-                                    XP
-                                  </span>
                                 </div>
                               </div>
 
-                              {/* Fila 3: Título de la misión + Botón Crear */}
-                              <div className="flex gap-2">
-                                <input
-                                  type="text"
-                                  value={hunter.quickForm.title}
-                                  onChange={(e) =>
-                                    hunter.setQuickForm({
-                                      ...hunter.quickForm,
-                                      title: e.target.value,
-                                    })
-                                  }
-                                  placeholder={`Título de la misión para ${hunter.player}...`}
-                                  className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5]"
-                                />
-                                <button
-                                  type="submit"
-                                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#0052A3]"
-                                >
-                                  <Plus className="h-3.5 w-3.5" />
-                                  <span>Crear</span>
-                                </button>
-                              </div>
+                              {addingCustomCategoryFor === hunter.player && (
+                                <div className="flex items-center gap-1.5 rounded-lg border border-[#0066C5]/40 bg-white p-1.5">
+                                  <input
+                                    type="text"
+                                    value={customCategoryDraft}
+                                    onChange={(e) => setCustomCategoryDraft(e.target.value)}
+                                    placeholder="Nombre de categoría..."
+                                    className="flex-1 px-2 py-1 text-xs text-[#0F172A] outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCreateCustomCategory(hunter.player)}
+                                    className="rounded-md bg-[#0066C5] px-2.5 py-1 font-mono text-[10px] font-bold text-white"
+                                  >
+                                    Guardar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setAddingCustomCategoryFor(null)}
+                                    className="px-1.5 py-1 text-xs text-slate-400"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              )}
                             </form>
 
-                            {/* Lista de máximo 3 Quests diarias */}
-                            <div className="mt-3 space-y-2.5">
+                            {/* Lista de Misiones de Hoy (1 Clic para Completar y Sumar XP) */}
+                            <div className="mt-3 space-y-2">
                               {hunter.missionsData.top3.length === 0 ? (
-                                <div className="rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] p-5 text-center text-xs text-slate-400">
-                                  Sin quests activas para hoy.
+                                <div className="rounded-xl bg-[#F8FAFC] p-5 text-center text-xs text-slate-400">
+                                  Sin misiones hoy.
                                 </div>
                               ) : (
                                 hunter.missionsData.top3.map((quest) => {
                                   const rpgStatus = getQuestRpgStatus(quest);
                                   const diffInfo = getQuestDifficultyInfo(quest);
-                                  const isPending = rpgStatus === 'Pendiente';
-                                  const isInCourse = rpgStatus === 'En Curso';
                                   const isCompleted = rpgStatus === 'Completado';
+                                  const normAssignee = normalizeAssignee(quest.assignee);
 
                                   return (
                                     <div
                                       key={quest.id}
-                                      className={`rounded-xl border p-3 transition-colors ${
+                                      className={`rounded-xl border p-3.5 transition-colors ${
                                         isCompleted
                                           ? 'border-[#10B981]/30 bg-[#10B981]/[0.03]'
-                                          : isInCourse
-                                          ? 'border-[#0066C5]/40 bg-[#0066C5]/[0.03]'
                                           : 'border-[#E2E8F0] bg-white'
                                       }`}
                                     >
-                                      <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <div className="flex flex-wrap items-center gap-1.5">
-                                          <span className="rounded-md bg-[#F8FAFC] px-2 py-0.5 text-[11px] font-semibold text-[#0F172A] ring-1 ring-[#E2E8F0]">
-                                            {quest.client || 'Zenda Agency'}
-                                          </span>
-
-                                          {/* Selector rápido de XP libre en la tarjeta */}
-                                          <div className="inline-flex items-center gap-1 rounded-md border border-[#0066C5]/30 bg-[#0066C5]/5 px-1.5 py-0.5">
-                                            <span className="font-mono text-[10px] font-bold text-[#0066C5]">
-                                              +
+                                      <div className="flex items-start justify-between gap-2">
+                                        <div className="space-y-1">
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="rounded-md bg-[#F8FAFC] px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                                              {quest.client || 'Zenda Agency'}
                                             </span>
-                                            <input
-                                              type="number"
-                                              min="10"
-                                              max="5000"
-                                              step="10"
-                                              defaultValue={diffInfo.xp}
-                                              key={`${quest.id}-${diffInfo.xp}`}
-                                              onBlur={(e) => {
-                                                const nextVal = Number(e.target.value);
-                                                if (nextVal > 0 && nextVal !== diffInfo.xp) {
-                                                  handleChangeQuestCustomXp(quest, nextVal);
-                                                }
-                                              }}
-                                              className="w-11 bg-transparent font-mono text-[10px] font-bold text-[#0066C5] outline-none"
-                                              title="Editar XP libre de esta misión"
-                                            />
-                                            <span className="font-mono text-[10px] font-bold text-[#0066C5]">
-                                              XP
+                                            <span className="rounded-md bg-[#0066C5]/10 px-2 py-0.5 font-mono text-[11px] font-bold text-[#0066C5]">
+                                              +{diffInfo.xp} XP
                                             </span>
+                                            {normAssignee === 'Ambos' && (
+                                              <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-700">
+                                                Ambos
+                                              </span>
+                                            )}
                                           </div>
+                                          <p
+                                            className={`text-sm font-semibold leading-snug ${
+                                              isCompleted
+                                                ? 'line-through text-slate-400'
+                                                : 'text-[#0F172A]'
+                                            }`}
+                                          >
+                                            {quest.title}
+                                          </p>
                                         </div>
 
-                                        <div className="flex items-center gap-1">
+                                        <div className="flex shrink-0 items-center gap-1">
                                           <button
                                             type="button"
-                                            onClick={() => handleSwitchMissionAssignee(quest)}
-                                            className="rounded-md border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-0.5 font-mono text-[10px] font-medium text-slate-600 hover:text-[#0F172A]"
-                                            title="Cambiar responsable"
+                                            onClick={() => handleOpenEditQuestModal(quest)}
+                                            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0F172A]"
+                                            title="Editar misión"
                                           >
-                                            @{normalizeAssignee(quest.assignee)}
+                                            <Pencil className="h-3.5 w-3.5" />
                                           </button>
                                           <button
                                             type="button"
                                             onClick={() => handleDeleteSprint(quest.id)}
-                                            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-[#EF4444]"
-                                            title="Eliminar"
+                                            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#EF4444]"
+                                            title="Eliminar misión"
                                           >
                                             <Trash2 className="h-3.5 w-3.5" />
                                           </button>
                                         </div>
                                       </div>
 
-                                      <p
-                                        className={`mt-2 text-sm font-semibold ${
-                                          isCompleted
-                                            ? 'line-through text-slate-400'
-                                            : 'text-[#0F172A]'
-                                        }`}
-                                      >
-                                        {quest.title}
-                                      </p>
-
-                                      <div className="mt-2.5 flex items-center justify-between gap-2">
-                                        <div className="flex items-center gap-1">
-                                          {QUEST_STATES.map((st) => {
-                                            const active = rpgStatus === st;
-                                            return (
-                                              <button
-                                                key={st}
-                                                type="button"
-                                                onClick={() =>
-                                                  handleAdvanceQuestRpgState(quest, st)
-                                                }
-                                                className={`rounded-md px-2 py-1 font-mono text-[10px] font-semibold transition-colors ${
-                                                  active
-                                                    ? st === 'Completado'
-                                                      ? 'bg-[#10B981] text-white'
-                                                      : 'bg-[#0066C5] text-white'
-                                                    : 'bg-[#F8FAFC] text-slate-500 hover:text-[#0F172A]'
-                                                }`}
-                                              >
-                                                {st}
-                                              </button>
-                                            );
-                                          })}
-                                        </div>
+                                      <div className="mt-3 flex items-center justify-between gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSwitchMissionAssignee(quest)}
+                                          className="font-mono text-[11px] font-medium text-slate-400 hover:text-[#0F172A]"
+                                          title="Cambiar responsable (Kevin / Marco / Ambos)"
+                                        >
+                                          @{normAssignee}
+                                        </button>
 
                                         <button
                                           type="button"
-                                          onClick={() => handleAdvanceQuestRpgState(quest)}
-                                          className={`rounded-lg px-3 py-1 font-mono text-[11px] font-bold transition-colors ${
-                                            isPending
-                                              ? 'border border-[#0066C5] text-[#0066C5] hover:bg-[#0066C5] hover:text-white'
-                                              : isInCourse
-                                              ? 'bg-[#0066C5] text-white hover:bg-[#0052A3]'
-                                              : 'bg-[#10B981]/15 text-[#10B981]'
+                                          onClick={() =>
+                                            handleAdvanceQuestRpgState(
+                                              quest,
+                                              isCompleted ? 'Pendiente' : 'Completado',
+                                            )
+                                          }
+                                          className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 font-mono text-xs font-bold transition-colors ${
+                                            isCompleted
+                                              ? 'bg-[#10B981]/15 text-[#10B981]'
+                                              : 'bg-[#0066C5] text-white shadow-sm hover:bg-[#0052A3]'
                                           }`}
                                         >
-                                          {isPending
-                                            ? 'Iniciar →'
-                                            : isInCourse
-                                            ? `Completar (+${diffInfo.xp} XP)`
-                                            : 'Completado ✓'}
+                                          {isCompleted ? (
+                                            <span>Completada ✓</span>
+                                          ) : (
+                                            <span>✓ Completar (+{diffInfo.xp} XP)</span>
+                                          )}
                                         </button>
                                       </div>
                                     </div>
@@ -4649,15 +5168,13 @@ export default function AdminDashboard() {
                 </section>
 
                 {/* ============================================================ */}
-                {/* 4. SECCIÓN INFERIOR CON PESTAÑAS CLARAS:                     */}
-                {/*    Misiones Activas | Historial de Victorias & Publicaciones */}
+                {/* 4. SECCIÓN INFERIOR: Misiones Activas | Historial            */}
                 {/* ============================================================ */}
                 <section
-                  aria-label="Misiones Activas e Historial de Victorias"
+                  aria-label="Misiones Activas e Historial"
                   className="rounded-2xl border border-[#E2E8F0] bg-[#FFFFFF] p-4 sm:p-5 shadow-sm"
                 >
                   <div className="flex flex-col gap-3 border-b border-[#E2E8F0] pb-3.5 sm:flex-row sm:items-center sm:justify-between">
-                    {/* Pestañas: Misiones Activas | Historial de Victorias & Publicaciones */}
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -4665,11 +5182,10 @@ export default function AdminDashboard() {
                         className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors ${
                           bottomSectionTab === 'active'
                             ? 'bg-[#0066C5] text-white shadow-sm'
-                            : 'border border-[#E2E8F0] bg-[#F8FAFC] text-slate-600 hover:text-[#0F172A]'
+                            : 'bg-[#F8FAFC] text-slate-600 hover:text-[#0F172A]'
                         }`}
                       >
-                        <Filter className="h-3.5 w-3.5" />
-                        <span>Misiones Activas (Backlog por Cuenta)</span>
+                        <span>Misiones Activas</span>
                       </button>
 
                       <button
@@ -4678,24 +5194,13 @@ export default function AdminDashboard() {
                         className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors ${
                           bottomSectionTab === 'history'
                             ? 'bg-[#0066C5] text-white shadow-sm'
-                            : 'border border-[#E2E8F0] bg-[#F8FAFC] text-slate-600 hover:text-[#0F172A]'
+                            : 'bg-[#F8FAFC] text-slate-600 hover:text-[#0F172A]'
                         }`}
                       >
-                        <Trophy className="h-3.5 w-3.5" />
-                        <span>Historial de Victorias &amp; Publicaciones</span>
-                        <span
-                          className={`rounded-full px-2 py-0.5 font-mono text-[10px] ${
-                            bottomSectionTab === 'history'
-                              ? 'bg-white/20 text-white'
-                              : 'bg-white text-slate-600 ring-1 ring-[#E2E8F0]'
-                          }`}
-                        >
-                          {filteredVictoryHistory.length}
-                        </span>
+                        <span>Historial ({filteredVictoryHistory.length})</span>
                       </button>
                     </div>
 
-                    {/* Filtros contextuales según la pestaña activa */}
                     {bottomSectionTab === 'active' ? (
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="relative">
@@ -4704,18 +5209,18 @@ export default function AdminDashboard() {
                             type="text"
                             value={backlogSearchQuery}
                             onChange={(e) => setBacklogSearchQuery(e.target.value)}
-                            placeholder="Buscar tarea..."
+                            placeholder="Buscar..."
                             className="w-36 sm:w-44 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] py-1 pl-8 pr-2.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5] focus:bg-white"
                           />
                         </div>
 
-                        <div className="flex rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-0.5 text-xs">
+                        <div className="flex rounded-lg bg-[#F8FAFC] p-0.5 text-xs">
                           {['all', 'Kevin', 'Marco'].map((who) => (
                             <button
                               key={who}
                               type="button"
                               onClick={() => setBacklogAssigneeFilter(who)}
-                              className={`rounded-md px-2.5 py-0.5 font-medium transition-colors ${
+                              className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
                                 backlogAssigneeFilter === who
                                   ? 'bg-[#0066C5] text-white'
                                   : 'text-slate-600 hover:text-[#0F172A]'
@@ -4728,8 +5233,7 @@ export default function AdminDashboard() {
                       </div>
                     ) : (
                       <div className="flex flex-wrap items-center gap-2">
-                        {/* Filtro Jugador */}
-                        <div className="flex rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-0.5 text-xs">
+                        <div className="flex rounded-lg bg-[#F8FAFC] p-0.5 text-xs">
                           {[
                             { id: 'all', label: 'Todos' },
                             { id: 'Kevin', label: 'Kevin' },
@@ -4739,7 +5243,7 @@ export default function AdminDashboard() {
                               key={who.id}
                               type="button"
                               onClick={() => setHistoryPlayerFilter(who.id)}
-                              className={`rounded-md px-2.5 py-0.5 font-medium transition-colors ${
+                              className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
                                 historyPlayerFilter === who.id
                                   ? 'bg-[#0066C5] text-white'
                                   : 'text-slate-600 hover:text-[#0F172A]'
@@ -4750,18 +5254,17 @@ export default function AdminDashboard() {
                           ))}
                         </div>
 
-                        {/* Filtro Tipo: Reels Publicados vs Misiones Completadas */}
-                        <div className="flex rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-0.5 text-xs">
+                        <div className="flex rounded-lg bg-[#F8FAFC] p-0.5 text-xs">
                           {[
                             { id: 'all', label: 'Todo' },
-                            { id: 'reel', label: '🎬 Reels Publicados' },
-                            { id: 'quest', label: '✓ Misiones Completadas' },
+                            { id: 'reel', label: 'Reels' },
+                            { id: 'quest', label: 'Misiones' },
                           ].map((tp) => (
                             <button
                               key={tp.id}
                               type="button"
                               onClick={() => setHistoryTypeFilter(tp.id)}
-                              className={`rounded-md px-2.5 py-0.5 font-medium transition-colors ${
+                              className={`rounded-md px-2.5 py-1 font-medium transition-colors ${
                                 historyTypeFilter === tp.id
                                   ? 'bg-[#0F172A] text-white'
                                   : 'text-slate-600 hover:text-[#0F172A]'
@@ -4775,7 +5278,7 @@ export default function AdminDashboard() {
                     )}
                   </div>
 
-                  {/* CONTENIDO PESTAÑA 1: MISIONES ACTIVAS (BACKLOG POR CUENTA CON PENDIENTES DINÁMICOS) */}
+                  {/* CONTENIDO PESTAÑA 1: MISIONES ACTIVAS */}
                   {bottomSectionTab === 'active' ? (
                     <div className="mt-3 space-y-2">
                       {backlogByClient.map((group) => {
@@ -4803,10 +5306,10 @@ export default function AdminDashboard() {
                                   {client.name}
                                 </span>
                                 <span
-                                  className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold ring-1 ${
+                                  className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold ${
                                     pendingBacklogCount > 0
-                                      ? 'bg-[#0066C5]/10 text-[#0066C5] ring-[#0066C5]/30'
-                                      : 'bg-white text-slate-500 ring-[#E2E8F0]'
+                                      ? 'bg-[#0066C5]/10 text-[#0066C5]'
+                                      : 'bg-white text-slate-500'
                                   }`}
                                 >
                                   {pendingBacklogCount} pendientes
@@ -4837,7 +5340,10 @@ export default function AdminDashboard() {
                                       handleQuickCreateMissionInline({
                                         title: quickVal,
                                         client: client.name,
-                                        assignee: client.leadOwner || 'Kevin',
+                                        assignee:
+                                          backlogAssigneeFilter !== 'all'
+                                            ? backlogAssigneeFilter
+                                            : client.leadOwner || 'Kevin',
                                         questDifficulty: 'Guion',
                                         customXp: 100,
                                         priority: 'Media',
@@ -4860,7 +5366,7 @@ export default function AdminDashboard() {
                                           [client.id]: e.target.value,
                                         }))
                                       }
-                                      placeholder={`Añadir tarea a ${client.name} (+100 XP)...`}
+                                      placeholder={`Nueva misión en ${client.name} (+100 XP)...`}
                                       className="flex-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-xs text-[#0F172A] placeholder-slate-400 outline-none focus:border-[#0066C5] focus:bg-white"
                                     />
                                     <button
@@ -4868,13 +5374,13 @@ export default function AdminDashboard() {
                                       className="inline-flex items-center gap-1 rounded-lg bg-[#0066C5] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0052A3]"
                                     >
                                       <Plus className="h-3.5 w-3.5" />
-                                      Guardar
+                                      Crear
                                     </button>
                                   </form>
 
                                   {filteredTasks.length === 0 ? (
                                     <p className="py-2 text-center text-xs text-slate-400">
-                                      Sin tareas en reserva.
+                                      Sin misiones.
                                     </p>
                                   ) : (
                                     <div className="space-y-1.5">
@@ -4883,6 +5389,7 @@ export default function AdminDashboard() {
                                         const diffInfo = getQuestDifficultyInfo(task);
                                         const inTop3 = activeTop3IdsSet.has(task.id);
                                         const assignee = normalizeAssignee(task.assignee);
+                                        const isDone = rpgSt === 'Completado';
 
                                         return (
                                           <div
@@ -4898,14 +5405,12 @@ export default function AdminDashboard() {
                                               <span className="font-mono text-[11px] font-semibold text-slate-500">
                                                 @{assignee}
                                               </span>
-                                              <span
-                                                className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-bold ${diffInfo.colorClass}`}
-                                              >
-                                                {diffInfo.badgeLabel}
+                                              <span className="rounded bg-[#0066C5]/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#0066C5]">
+                                                +{diffInfo.xp} XP
                                               </span>
                                               <span
                                                 className={`text-xs font-semibold ${
-                                                  rpgSt === 'Completado'
+                                                  isDone
                                                     ? 'line-through text-slate-400'
                                                     : 'text-[#0F172A]'
                                                 }`}
@@ -4917,21 +5422,28 @@ export default function AdminDashboard() {
                                             <div className="flex items-center gap-1.5">
                                               <button
                                                 type="button"
-                                                onClick={() => handleAdvanceQuestRpgState(task)}
-                                                className={`rounded-md border px-2 py-1 font-mono text-[10px] font-bold ${
-                                                  rpgSt === 'Completado'
-                                                    ? 'border-[#10B981]/30 bg-[#10B981]/10 text-[#10B981]'
-                                                    : 'border-[#E2E8F0] bg-white text-[#0F172A] hover:border-[#0066C5] hover:text-[#0066C5]'
+                                                onClick={() =>
+                                                  handleAdvanceQuestRpgState(
+                                                    task,
+                                                    isDone ? 'Pendiente' : 'Completado',
+                                                  )
+                                                }
+                                                className={`rounded-md px-2.5 py-1 font-mono text-[10px] font-bold ${
+                                                  isDone
+                                                    ? 'bg-[#10B981]/15 text-[#10B981]'
+                                                    : 'bg-[#0066C5] text-white hover:bg-[#0052A3]'
                                                 }`}
                                               >
-                                                {rpgSt} →
+                                                {isDone
+                                                  ? 'Completada ✓'
+                                                  : `✓ Completar (+${diffInfo.xp} XP)`}
                                               </button>
 
-                                              {!inTop3 && rpgSt !== 'Completado' && (
+                                              {!inTop3 && !isDone && (
                                                 <button
                                                   type="button"
                                                   onClick={() => handlePromoteBacklogToToday(task)}
-                                                  className="rounded-md bg-[#0066C5]/10 px-2 py-1 font-mono text-[10px] font-bold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
+                                                  className="rounded-md bg-white px-2 py-1 font-mono text-[10px] font-semibold text-[#0066C5] ring-1 ring-[#E2E8F0] hover:bg-[#0066C5] hover:text-white"
                                                 >
                                                   Subir a Hoy
                                                 </button>
@@ -4939,8 +5451,18 @@ export default function AdminDashboard() {
 
                                               <button
                                                 type="button"
+                                                onClick={() => handleOpenEditQuestModal(task)}
+                                                className="rounded p-1 text-slate-400 hover:text-[#0F172A]"
+                                                title="Editar"
+                                              >
+                                                <Pencil className="h-3.5 w-3.5" />
+                                              </button>
+
+                                              <button
+                                                type="button"
                                                 onClick={() => handleDeleteSprint(task.id)}
                                                 className="rounded p-1 text-slate-400 hover:text-[#EF4444]"
+                                                title="Eliminar"
                                               >
                                                 <Trash2 className="h-3.5 w-3.5" />
                                               </button>
@@ -4958,29 +5480,24 @@ export default function AdminDashboard() {
                       })}
                     </div>
                   ) : (
-                    /* CONTENIDO PESTAÑA 2: BÓVEDA / HISTORIAL DE VICTORIAS & PUBLICACIONES */
+                    /* CONTENIDO PESTAÑA 2: HISTORIAL */
                     <div className="mt-3">
                       {filteredVictoryHistory.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-[#E2E8F0] bg-[#F8FAFC] p-8 text-center">
-                          <p className="font-mono text-xs font-semibold text-slate-500">
-                            Aún no hay victorias o publicaciones registradas con este filtro.
-                          </p>
-                          <p className="mt-1 text-xs text-slate-400">
-                            Cada Quest completada o Reel publicado con el botón + Publicar quedará guardado permanentemente aquí.
-                          </p>
+                        <div className="rounded-xl bg-[#F8FAFC] p-8 text-center text-xs text-slate-400">
+                          Sin registros aún.
                         </div>
                       ) : (
                         <div className="overflow-x-auto">
                           <table className="w-full text-left text-xs">
                             <thead className="border-b border-[#E2E8F0] bg-[#F8FAFC] font-mono text-[10px] uppercase tracking-wider text-slate-500">
                               <tr>
-                                <th className="px-3.5 py-2.5">Fecha &amp; Hora</th>
-                                <th className="px-3.5 py-2.5">Jugador</th>
+                                <th className="px-3.5 py-2.5">Fecha</th>
+                                <th className="px-3.5 py-2.5">Socio</th>
                                 <th className="px-3.5 py-2.5">Tipo</th>
-                                <th className="px-3.5 py-2.5">Cuenta / Categoría</th>
-                                <th className="px-3.5 py-2.5">Título / Victoria</th>
+                                <th className="px-3.5 py-2.5">Cuenta</th>
+                                <th className="px-3.5 py-2.5">Misión / Reel</th>
                                 <th className="px-3.5 py-2.5 text-right">XP</th>
-                                <th className="px-3.5 py-2.5 text-right">Enlace</th>
+                                <th className="px-3.5 py-2.5 text-right">Link</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-[#E2E8F0]">
@@ -5013,10 +5530,10 @@ export default function AdminDashboard() {
                                             ? 'bg-[#10B981]/10 text-[#10B981]'
                                             : isNegative
                                             ? 'bg-[#EF4444]/10 text-[#EF4444]'
-                                            : 'bg-[#F8FAFC] text-slate-600 ring-1 ring-[#E2E8F0]'
+                                            : 'bg-[#F8FAFC] text-slate-600'
                                         }`}
                                       >
-                                        {isReel ? '🎬 Reel Publicado' : isNegative ? '⚠️ Penalización' : '✓ Quest'}
+                                        {isReel ? '🎬 Reel' : isNegative ? '⚠️ -XP' : '✓ Misión'}
                                       </span>
                                     </td>
                                     <td className="whitespace-nowrap px-3.5 py-2.5 font-semibold text-[#0F172A]">
@@ -5038,9 +5555,9 @@ export default function AdminDashboard() {
                                           href={item.link}
                                           target="_blank"
                                           rel="noopener noreferrer"
-                                          className="inline-flex items-center gap-1 rounded-md border border-[#0066C5]/30 bg-[#0066C5]/5 px-2 py-0.5 font-mono text-[10px] font-semibold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
+                                          className="inline-flex items-center gap-1 rounded-md bg-[#0066C5]/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
                                         >
-                                          <span>Ver Reel</span>
+                                          <span>Abrir</span>
                                           <ExternalLink className="h-3 w-3" />
                                         </a>
                                       ) : (
@@ -7798,7 +8315,7 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Modal 1: + Nueva Quest Personalizada con XP Libre y Categorías */}
+      {/* Modal 1: Gestión Simple de Misiones (Crear y Editar en 2 Clics: Título, Responsable Kevin/Marco/Ambos, Cliente opcional, XP) */}
       <AnimatePresence>
         {sprintModalOpen && (
           <motion.div
@@ -7807,49 +8324,82 @@ export default function AdminDashboard() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
-            onClick={() => setSprintModalOpen(false)}
+            onClick={() => {
+              setEditingQuestId(null);
+              setSprintModalOpen(false);
+            }}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.96, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 10 }}
               transition={SPRING_TRANSITION}
-              className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-slate-900 shadow-2xl"
+              className="w-full max-w-md rounded-2xl border border-[#E2E8F0] bg-white p-6 text-[#0F172A] shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                <h3 className="font-mono text-sm font-bold uppercase tracking-wider text-slate-900">
-                  + Nueva Quest Personalizada (XP Libre)
+              <div className="flex items-center justify-between border-b border-[#E2E8F0] pb-3.5">
+                <h3 className="text-base font-bold text-[#0F172A]">
+                  {editingQuestId ? 'Editar Misión' : 'Nueva Misión'}
                 </h3>
                 <button
                   type="button"
-                  onClick={() => setSprintModalOpen(false)}
-                  className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-900"
+                  onClick={() => {
+                    setEditingQuestId(null);
+                    setSprintModalOpen(false);
+                  }}
+                  className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0F172A]"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
 
-              <form onSubmit={handleAddSprint} className="mt-5 space-y-4 text-xs">
+              <form onSubmit={handleAddSprint} className="mt-4 space-y-4 text-xs">
+                {/* 1. Título corto */}
                 <div>
-                  <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                    Título de la Misión / Reto
+                  <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    1. Título corto
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="Ej. Reel autoridad IA para negocios o Bloque profundo de programación"
+                    placeholder="Ej. Grabar 3 reels de Dolciangel"
                     value={newSprint.title}
                     onChange={(e) => setNewSprint({ ...newSprint, title: e.target.value })}
-                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 text-slate-900 outline-none focus:border-[#0066C5] focus:bg-white"
+                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 text-sm font-semibold text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
                   />
                 </div>
 
-                {/* Categoría (4 Clientes, Personal/Hábito, Estudio/Entreno, o Crear Nueva) */}
+                {/* 2. Responsable (Kevin / Marco / Ambos en 1 clic) */}
+                <div>
+                  <label className="mb-1.5 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    2. Responsable
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['Kevin', 'Marco', 'Ambos'].map((who) => {
+                      const isSelected = normalizeAssignee(newSprint.assignee) === who;
+                      return (
+                        <button
+                          key={who}
+                          type="button"
+                          onClick={() => setNewSprint({ ...newSprint, assignee: who })}
+                          className={`rounded-xl border py-2.5 font-mono text-xs font-bold transition-colors ${
+                            isSelected
+                              ? 'border-[#0066C5] bg-[#0066C5] text-white shadow-sm'
+                              : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#0F172A] hover:border-[#0066C5]'
+                          }`}
+                        >
+                          {who}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3. Cliente / Categoría opcional */}
                 <div>
                   <div className="mb-1 flex items-center justify-between">
-                    <label className="block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                      Categoría / Cuenta
+                    <label className="block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      3. Cliente / Categoría (Opcional)
                     </label>
                     <button
                       type="button"
@@ -7860,7 +8410,7 @@ export default function AdminDashboard() {
                       }
                       className="font-mono text-[10px] font-bold text-[#0066C5] hover:underline"
                     >
-                      + Crear nueva categoría
+                      + Categoría
                     </button>
                   </div>
                   <select
@@ -7877,7 +8427,7 @@ export default function AdminDashboard() {
                         questDifficulty: getDefaultDifficultyForCategory(nextCat),
                       });
                     }}
-                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-[#0066C5] focus:bg-white"
+                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-medium text-[#0F172A] outline-none focus:border-[#0066C5] focus:bg-white"
                   >
                     {allQuestCategoryOptions.map((catName) => (
                       <option key={catName} value={catName}>
@@ -7893,8 +8443,8 @@ export default function AdminDashboard() {
                         type="text"
                         value={customCategoryDraft}
                         onChange={(e) => setCustomCategoryDraft(e.target.value)}
-                        placeholder="Escribe el nombre de la nueva categoría..."
-                        className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-xs text-slate-900 outline-none focus:border-[#0066C5]"
+                        placeholder="Nombre de categoría..."
+                        className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-xs text-[#0F172A] outline-none focus:border-[#0066C5]"
                       />
                       <button
                         type="button"
@@ -7907,13 +8457,13 @@ export default function AdminDashboard() {
                   )}
                 </div>
 
-                {/* Asignador de XP Libre (50, 100, 150, 250, 500 XP + Input Numérico Editable) */}
-                <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3.5">
-                  <label className="mb-2 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-600">
-                    Recompensa de XP Libre (Elige un botón rápido o escribe el valor según dificultad)
+                {/* 4. XP */}
+                <div>
+                  <label className="mb-1.5 block font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    4. Recompensa XP
                   </label>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-2.5">
+                    <div className="flex flex-wrap items-center gap-1">
                       {QUICK_XP_PRESETS.map((xpVal) => {
                         const isSelected = Number(newSprint.customXp) === xpVal;
                         return (
@@ -7926,16 +8476,16 @@ export default function AdminDashboard() {
                             className={`rounded-lg px-2.5 py-1.5 font-mono text-xs font-bold transition-colors ${
                               isSelected
                                 ? 'bg-[#0066C5] text-white shadow-sm'
-                                : 'border border-[#E2E8F0] bg-white text-slate-700 hover:border-[#0066C5] hover:text-[#0066C5]'
+                                : 'bg-white text-slate-700 hover:text-[#0066C5]'
                             }`}
                           >
-                            +{xpVal} XP
+                            +{xpVal}
                           </button>
                         );
                       })}
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1">
                       <input
                         type="number"
                         min="10"
@@ -7946,7 +8496,7 @@ export default function AdminDashboard() {
                         onChange={(e) =>
                           setNewSprint({ ...newSprint, customXp: e.target.value })
                         }
-                        className="w-24 rounded-lg border border-[#CBD5E1] bg-white px-3 py-1.5 text-right font-mono text-sm font-bold text-[#0066C5] outline-none focus:border-[#0066C5]"
+                        className="w-20 rounded-lg border border-[#CBD5E1] bg-white px-2.5 py-1.5 text-right font-mono text-sm font-bold text-[#0066C5] outline-none focus:border-[#0066C5]"
                       />
                       <span className="font-mono text-xs font-bold text-[#0066C5]">
                         XP
@@ -7955,56 +8505,14 @@ export default function AdminDashboard() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                      Asignado a
-                    </label>
-                    <select
-                      value={newSprint.assignee}
-                      onChange={(e) => setNewSprint({ ...newSprint, assignee: e.target.value })}
-                      className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-[#0066C5] focus:bg-white"
-                    >
-                      <option value="Kevin">Kevin</option>
-                      <option value="Marco">Marco</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                      Prioridad
-                    </label>
-                    <select
-                      value={newSprint.priority}
-                      onChange={(e) => setNewSprint({ ...newSprint, priority: e.target.value })}
-                      className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-[#0066C5] focus:bg-white"
-                    >
-                      <option value="Urgente">Urgente</option>
-                      <option value="Alta">Alta</option>
-                      <option value="Media">Media</option>
-                      <option value="Baja">Baja</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-slate-600">
-                    Fecha Objetivo
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={newSprint.deadline}
-                    onChange={(e) => setNewSprint({ ...newSprint, deadline: e.target.value })}
-                    className="w-full rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] p-3 font-mono text-slate-900 outline-none focus:border-[#0066C5] focus:bg-white"
-                  />
-                </div>
-
-                <div className="mt-6 flex justify-end gap-3 pt-2">
+                <div className="mt-5 flex justify-end gap-2.5 pt-2">
                   <button
                     type="button"
-                    onClick={() => setSprintModalOpen(false)}
-                    className="rounded-xl px-4 py-2 font-mono text-slate-500 hover:text-slate-900"
+                    onClick={() => {
+                      setEditingQuestId(null);
+                      setSprintModalOpen(false);
+                    }}
+                    className="rounded-xl px-4 py-2 font-mono text-xs text-slate-500 hover:text-[#0F172A]"
                   >
                     Cancelar
                   </button>
@@ -8015,10 +8523,210 @@ export default function AdminDashboard() {
                     transition={SPRING_TRANSITION}
                     className="rounded-xl bg-[#0066C5] px-5 py-2.5 font-mono text-xs font-bold text-white shadow-sm hover:bg-[#0052A3]"
                   >
-                    Guardar Quest (+{newSprint.customXp || 100} XP)
+                    {editingQuestId
+                      ? `Guardar Cambios (+${newSprint.customXp || 100} XP)`
+                      : `Crear Misión (+${newSprint.customXp || 100} XP)`}
                   </motion.button>
                 </div>
               </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal 1B: CRUD Completo de Recompensas Semanales Elegibles (Meta Semanal 12/12) */}
+      <AnimatePresence>
+        {rewardsModalOpen && (
+          <motion.div
+            key="modal-weekly-rewards"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+            onClick={() => {
+              setEditingRewardId(null);
+              setRewardsModalOpen(false);
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 10 }}
+              transition={SPRING_TRANSITION}
+              className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[#E2E8F0] bg-white p-6 text-[#0F172A] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between border-b border-[#E2E8F0] pb-3.5">
+                <div>
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#0066C5]">
+                    Meta Semanal ({weeklyPublishedCount}/{WEEKLY_AGENCY_GOAL} Reels)
+                  </span>
+                  <h3 className="text-base font-bold text-[#0F172A]">
+                    Recompensas Semanales de Socios
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingRewardId(null);
+                    setRewardsModalOpen(false);
+                  }}
+                  className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0F172A]"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Formulario para Crear o Editar una Recompensa Semanal */}
+              <form
+                onSubmit={handleSaveWeeklyReward}
+                className="mt-4 space-y-2.5 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3.5 text-xs"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    {editingRewardId ? 'Editar Recompensa' : '+ Nueva Recompensa'}
+                  </span>
+                  {editingRewardId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingRewardId(null);
+                        setRewardForm({ emoji: '💪', title: '' });
+                      }}
+                      className="font-mono text-[10px] font-semibold text-slate-500 hover:text-[#0F172A]"
+                    >
+                      Cancelar edición
+                    </button>
+                  )}
+                </div>
+
+                {/* Selector rápido de Emojis */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {REWARD_EMOJI_OPTIONS.map((em) => (
+                    <button
+                      key={em}
+                      type="button"
+                      onClick={() => setRewardForm({ ...rewardForm, emoji: em })}
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg border text-base transition-colors ${
+                        rewardForm.emoji === em
+                          ? 'border-[#0066C5] bg-[#0066C5]/10'
+                          : 'border-[#E2E8F0] bg-white hover:border-[#0066C5]'
+                      }`}
+                    >
+                      {em}
+                    </button>
+                  ))}
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={rewardForm.emoji}
+                    onChange={(e) =>
+                      setRewardForm({ ...rewardForm, emoji: e.target.value })
+                    }
+                    aria-label="Emoji personalizado"
+                    className="h-8 w-12 rounded-lg border border-[#E2E8F0] bg-white text-center text-sm outline-none focus:border-[#0066C5]"
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. Ir al gym juntos, Salida de tarde, Cena libre..."
+                    value={rewardForm.title}
+                    onChange={(e) =>
+                      setRewardForm({ ...rewardForm, title: e.target.value })
+                    }
+                    className="flex-1 rounded-xl border border-[#CBD5E1] bg-white px-3 py-2 text-xs font-semibold text-[#0F172A] outline-none focus:border-[#0066C5]"
+                  />
+                  <button
+                    type="submit"
+                    className="shrink-0 rounded-xl bg-[#0066C5] px-4 py-2 font-mono text-xs font-bold text-white hover:bg-[#0052A3]"
+                  >
+                    {editingRewardId ? 'Actualizar' : 'Agregar'}
+                  </button>
+                </div>
+              </form>
+
+              {/* Lista de Recompensas (Seleccionar activa, Editar o Eliminar) */}
+              <div className="mt-4 space-y-2">
+                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Elige la recompensa activa para esta semana:
+                </p>
+
+                {weeklyRewardsList.map((rew) => {
+                  const isActive = activeWeeklyReward.id === rew.id;
+                  return (
+                    <div
+                      key={rew.id}
+                      className={`flex items-center justify-between gap-2 rounded-xl border p-3 transition-colors ${
+                        isActive
+                          ? 'border-[#0066C5] bg-[#0066C5]/[0.04]'
+                          : 'border-[#E2E8F0] bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleSelectActiveReward(rew)}
+                        className="flex flex-1 items-center gap-2.5 text-left"
+                      >
+                        <span className="text-lg">{rew.emoji || '🏆'}</span>
+                        <div>
+                          <p className="text-sm font-bold text-[#0F172A]">
+                            {rew.title}
+                          </p>
+                          {isActive && (
+                            <span className="font-mono text-[10px] font-bold text-[#0066C5]">
+                              ✓ Recompensa activa en Meta Semanal
+                            </span>
+                          )}
+                        </div>
+                      </button>
+
+                      <div className="flex shrink-0 items-center gap-1">
+                        {!isActive && (
+                          <button
+                            type="button"
+                            onClick={() => handleSelectActiveReward(rew)}
+                            className="rounded-lg bg-[#F8FAFC] px-2.5 py-1 font-mono text-[11px] font-bold text-[#0066C5] hover:bg-[#0066C5] hover:text-white"
+                          >
+                            Elegir
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleEditWeeklyReward(rew)}
+                          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#0F172A]"
+                          title="Editar recompensa"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteWeeklyReward(rew.id)}
+                          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#EF4444]"
+                          title="Eliminar recompensa"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-5 flex justify-end border-t border-[#E2E8F0] pt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingRewardId(null);
+                    setRewardsModalOpen(false);
+                  }}
+                  className="rounded-xl bg-[#0F172A] px-5 py-2 font-mono text-xs font-bold text-white hover:bg-slate-800"
+                >
+                  Listo
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}

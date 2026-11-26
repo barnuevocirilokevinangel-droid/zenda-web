@@ -1,0 +1,385 @@
+{
+  "communities": {
+    "0": [
+      "src_components_forms_formfields",
+      "src_components_forms_formfields_a11y",
+      "src_components_forms_formfields_borderfor",
+      "src_components_forms_formfields_checkbox",
+      "src_components_forms_formfields_chipgroup",
+      "src_components_forms_formfields_field",
+      "src_components_forms_formfields_inputclasses",
+      "src_components_forms_formfields_optioncards",
+      "src_components_forms_formfields_selectinput",
+      "src_components_forms_formfields_textarea",
+      "src_components_forms_formfields_textinput",
+      "src_config_company",
+      "src_config_company_company",
+      "src_lib_savedocument",
+      "src_lib_savedocument_savedocument",
+      "src_lib_savedocument_withtimeout",
+      "src_lib_usepagemeta",
+      "src_lib_usepagemeta_usepagemeta",
+      "src_lib_whatsapp",
+      "src_lib_whatsapp_buildwhatsapplink",
+      "src_lib_whatsapp_formatwhatsappnumber",
+      "src_lib_whatsapp_getwhatsappnumber",
+      "src_pages_admin_login",
+      "src_pages_admin_login_adminlogin",
+      "src_pages_clientonboarding",
+      "src_pages_clientonboarding_channels",
+      "src_pages_clientonboarding_clientonboarding",
+      "src_pages_clientonboarding_goal_options",
+      "src_pages_clientonboarding_initial_values",
+      "src_pages_clientonboarding_steps",
+      "src_pages_clientonboarding_tickets",
+      "src_pages_clientonboarding_tools_list",
+      "src_pages_clientonboarding_validatestep",
+      "src_pages_clientonboarding_volumes",
+      "src_pages_legal_legallayout",
+      "src_pages_legal_legallayout_contactlist",
+      "src_pages_legal_legallayout_legallayout",
+      "src_pages_legal_legallayout_legallist",
+      "src_pages_legal_legallayout_legalsection",
+      "src_pages_legal_legallayout_provideridentity",
+      "src_pages_legal_privacy",
+      "src_pages_legal_privacy_privacy",
+      "src_pages_legal_reclamaciones",
+      "src_pages_legal_reclamaciones_claim_types",
+      "src_pages_legal_reclamaciones_doc_types",
+      "src_pages_legal_reclamaciones_formblock",
+      "src_pages_legal_reclamaciones_generatereference",
+      "src_pages_legal_reclamaciones_good_types",
+      "src_pages_legal_reclamaciones_initial_values",
+      "src_pages_legal_reclamaciones_reclamaciones",
+      "src_pages_legal_reclamaciones_todaylabel",
+      "src_pages_legal_reclamaciones_validate",
+      "src_pages_legal_terms",
+      "src_pages_legal_terms_terms",
+      "src_pages_notfound",
+      "src_pages_notfound_notfound"
+    ],
+    "1": [
+      "ref_framer_motion",
+      "src_components_animatedcounter",
+      "src_components_animatedcounter_animatedcounter",
+      "src_components_casegallery_casegallery",
+      "src_components_casestudies",
+      "src_components_casestudies_casecard",
+      "src_components_casestudies_cases",
+      "src_components_casestudies_casestudies",
+      "src_components_casestudies_gotocontact",
+      "src_components_hero",
+      "src_components_hero_hero",
+      "src_components_marquee",
+      "src_components_marquee_marquee",
+      "src_components_marquee_stack",
+      "src_components_marquee_track",
+      "src_components_metrics",
+      "src_components_metrics_metrics",
+      "src_components_metrics_metrics_ddf6a1f0ce8c",
+      "src_components_metrics_metrictile",
+      "src_components_process",
+      "src_components_process_process",
+      "src_components_process_steps",
+      "src_components_scrollreveal",
+      "src_components_scrollreveal_directions",
+      "src_components_scrollreveal_scrollreveal",
+      "src_components_spotlightcard",
+      "src_components_spotlightcard_spotlightcard",
+      "src_components_stagger",
+      "src_components_stagger_container",
+      "src_components_stagger_item",
+      "src_components_stagger_staggergroup",
+      "src_components_stagger_staggeritem",
+      "src_components_textreveal",
+      "src_components_textreveal_textreveal",
+      "src_components_verticals",
+      "src_components_verticals_verticalcard",
+      "src_components_verticals_verticals",
+      "src_components_verticals_verticals_a43b060b6110",
+      "src_pages_home",
+      "src_pages_home_home"
+    ],
+    "2": [
+      "ref_firebase",
+      "src_components_protectedroute",
+      "src_components_protectedroute_protectedroute",
+      "src_firebase",
+      "src_firebase_app",
+      "src_firebase_auth",
+      "src_firebase_db",
+      "src_firebase_firebaseconfig",
+      "src_firebase_isfirebaseconfigured",
+      "src_pages_admin_dashboard",
+      "src_pages_admin_dashboard_admindashboard",
+      "src_pages_admin_dashboard_confetti_particles",
+      "src_pages_admin_dashboard_default_social_metrics",
+      "src_pages_admin_dashboard_ensurefourofficialaccounts",
+      "src_pages_admin_dashboard_formatexacttime",
+      "src_pages_admin_dashboard_getclientsocialmetrics",
+      "src_pages_admin_dashboard_getdefaultdifficultyforcategory",
+      "src_pages_admin_dashboard_getmissionstage",
+      "src_pages_admin_dashboard_getquestdifficultyinfo",
+      "src_pages_admin_dashboard_getquestrpgstatus",
+      "src_pages_admin_dashboard_gettodaydate",
+      "src_pages_admin_dashboard_ispersonalcategory",
+      "src_pages_admin_dashboard_mission_stages",
+      "src_pages_admin_dashboard_normalizeaccountkey",
+      "src_pages_admin_dashboard_normalizeassignee",
+      "src_pages_admin_dashboard_official_initial_clients",
+      "src_pages_admin_dashboard_personal_quest_categories",
+      "src_pages_admin_dashboard_playrpgsound",
+      "src_pages_admin_dashboard_quest_difficulties",
+      "src_pages_admin_dashboard_quest_states",
+      "src_pages_admin_dashboard_quick_xp_presets",
+      "src_pages_admin_dashboard_sortclientsofficialorder",
+      "src_pages_admin_dashboard_spring_transition"
+    ],
+    "3": [
+      "package",
+      "package_dependencies_react_dom",
+      "package_devdependencies",
+      "package_devdependencies_autoprefixer",
+      "package_devdependencies_oxlint",
+      "package_devdependencies_postcss",
+      "package_devdependencies_tailwindcss",
+      "package_devdependencies_vite",
+      "package_devdependencies_vitejs_plugin_react",
+      "package_name",
+      "package_private",
+      "package_scripts",
+      "package_scripts_build",
+      "package_scripts_dev",
+      "package_scripts_lint",
+      "package_scripts_preview",
+      "package_type",
+      "package_version",
+      "ref_autoprefixer",
+      "ref_oxlint",
+      "ref_postcss",
+      "ref_react_dom",
+      "ref_tailwindcss",
+      "ref_vite",
+      "ref_vitejs_plugin_react",
+      "vite_config"
+    ],
+    "4": [
+      "package_dependencies",
+      "package_dependencies_firebase",
+      "package_dependencies_framer_motion",
+      "package_dependencies_lucide_react",
+      "package_dependencies_react",
+      "package_dependencies_react_router_dom",
+      "ref_lucide_react",
+      "ref_react_router_dom",
+      "src_components_footer",
+      "src_components_footer_footer",
+      "src_components_footer_legal_links",
+      "src_components_footer_quick_links",
+      "src_components_navbar",
+      "src_components_navbar_nav_links",
+      "src_components_navbar_navbar",
+      "src_components_sitelayout",
+      "src_components_sitelayout_sitelayout"
+    ],
+    "5": [
+      "ref_react",
+      "src_app",
+      "src_app_admindashboard",
+      "src_app_adminlogin",
+      "src_app_app",
+      "src_app_clientonboarding",
+      "src_app_notfound",
+      "src_app_privacy",
+      "src_app_protectedroute",
+      "src_app_reclamaciones",
+      "src_app_terms",
+      "src_components_pageloader",
+      "src_components_pageloader_pageloader",
+      "src_components_scrollmanager",
+      "src_components_scrollmanager_scrollmanager",
+      "src_index",
+      "src_main"
+    ],
+    "6": [
+      "src_components_casegallery",
+      "src_components_casegallery_fallbacks",
+      "src_components_casemockups",
+      "src_components_casemockups_bar",
+      "src_components_casemockups_browserframe",
+      "src_components_casemockups_catalogmockup",
+      "src_components_casemockups_flowdiagram",
+      "src_components_casemockups_funnelmockup",
+      "src_components_casemockups_landingmockup",
+      "src_components_casemockups_realtimemockup",
+      "src_components_casemockups_reelmockup",
+      "src_components_casemockups_stage",
+      "src_components_casemockups_whatsappflowmockup"
+    ],
+    "7": [
+      "firebase",
+      "src_components_leadfunnel",
+      "src_components_leadfunnel_bottlenecks",
+      "src_components_leadfunnel_budgets",
+      "src_components_leadfunnel_buildwhatsappurl",
+      "src_components_leadfunnel_field",
+      "src_components_leadfunnel_initial_values",
+      "src_components_leadfunnel_leadfunnel",
+      "src_components_leadfunnel_simulatesave",
+      "src_components_leadfunnel_successscreen",
+      "src_components_leadfunnel_validate",
+      "src_components_leadfunnel_withtimeout"
+    ],
+    "8": [
+      "oxlintrc",
+      "oxlintrc_plugins",
+      "oxlintrc_rules",
+      "oxlintrc_rules_react_only_export_components",
+      "oxlintrc_rules_react_rules_of_hooks",
+      "oxlintrc_schema"
+    ],
+    "9": [
+      "src_components_logo",
+      "src_components_logo_logo"
+    ],
+    "10": [
+      "tailwind_config",
+      "tailwindcss"
+    ],
+    "11": [
+      "vercel",
+      "vercel_rewrites"
+    ],
+    "12": [
+      "postcss_config"
+    ]
+  },
+  "cohesion": {
+    "0": 0.09220779220779221,
+    "1": 0.13846153846153847,
+    "2": 0.10227272727272728,
+    "3": 0.09846153846153846,
+    "4": 0.17647058823529413,
+    "5": 0.23529411764705882,
+    "6": 0.38461538461538464,
+    "7": 0.25757575757575757,
+    "8": 0.3333333333333333,
+    "9": 1.0,
+    "10": 1.0,
+    "11": 1.0,
+    "12": 1.0
+  },
+  "gods": [
+    {
+      "id": "src_pages_legal_reclamaciones_reclamaciones",
+      "label": "Reclamaciones()",
+      "degree": 18
+    },
+    {
+      "id": "ref_react",
+      "label": "react",
+      "degree": 16
+    },
+    {
+      "id": "ref_react_router_dom",
+      "label": "react-router-dom",
+      "degree": 16
+    },
+    {
+      "id": "src_pages_admin_dashboard_admindashboard",
+      "label": "AdminDashboard()",
+      "degree": 16
+    },
+    {
+      "id": "src_components_textreveal_textreveal",
+      "label": "TextReveal()",
+      "degree": 15
+    },
+    {
+      "id": "src_lib_usepagemeta_usepagemeta",
+      "label": "usePageMeta()",
+      "degree": 15
+    },
+    {
+      "id": "ref_lucide_react",
+      "label": "lucide-react",
+      "degree": 14
+    },
+    {
+      "id": "src_app_app",
+      "label": "App()",
+      "degree": 14
+    },
+    {
+      "id": "src_components_leadfunnel_leadfunnel",
+      "label": "LeadFunnel()",
+      "degree": 12
+    },
+    {
+      "id": "ref_framer_motion",
+      "label": "framer-motion",
+      "degree": 11
+    }
+  ],
+  "surprises": [
+    {
+      "source": "App()",
+      "target": "SiteLayout()",
+      "source_files": [
+        "src/App.jsx",
+        "src/components/SiteLayout.jsx"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "bridges separate communities"
+    },
+    {
+      "source": "App()",
+      "target": "Home()",
+      "source_files": [
+        "src/App.jsx",
+        "src/pages/Home.jsx"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "bridges separate communities"
+    },
+    {
+      "source": "LeadFunnel()",
+      "target": "ScrollReveal()",
+      "source_files": [
+        "src/components/LeadFunnel.jsx",
+        "src/components/ScrollReveal.jsx"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "bridges separate communities"
+    },
+    {
+      "source": "LeadFunnel()",
+      "target": "TextReveal()",
+      "source_files": [
+        "src/components/LeadFunnel.jsx",
+        "src/components/TextReveal.jsx"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "bridges separate communities"
+    },
+    {
+      "source": "Home()",
+      "target": "LeadFunnel()",
+      "source_files": [
+        "src/pages/Home.jsx",
+        "src/components/LeadFunnel.jsx"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "bridges separate communities"
+    }
+  ],
+  "tokens": {
+    "input": 0,
+    "output": 0
+  }
+}
